@@ -1,5 +1,5 @@
 """
-Configuration for the Memory System - Phase 1
+Configuration for the Memory System - Phase 1 & Phase 2
 All tunable parameters from Section 12 of the spec
 """
 
@@ -14,6 +14,15 @@ MEMORY_DIR = PROJECT_ROOT / "memory"
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+
+# Qdrant Configuration (Phase 2)
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "memory_vectors")
+
+# Embedding Configuration (Phase 2)
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fast and good quality
+EMBEDDING_DIMENSION = 384  # Dimension for all-MiniLM-L6-v2
 
 # Memory Layer Configuration
 CORE_MEMORY_FILES = ["CORE.md", "PREFERENCES.md", "INSTRUCTIONS.md", "CONSTRAINTS.md"]
@@ -44,9 +53,37 @@ EXTRACTION_KEYWORDS = {
 # Memory Types (for Redis indexing)
 MEMORY_TYPES = ["preference", "constraint", "entity", "instruction", "commitment", "fact", "event"]
 
-# Retrieval Configuration (Phase 1: Basic retrieval, no semantic search yet)
+# Retrieval Configuration
 MAX_MEMORIES_TO_RETRIEVE = 10  # Top K memories to inject
 MEMORY_TOKEN_BUDGET = 500  # Total token budget for retrieved memories
+
+# Phase 2: Semantic Search Configuration
+SEMANTIC_SEARCH_ENABLED = True  # Enable vector-based semantic search
+SEMANTIC_SEARCH_LIMIT = 20  # Number of candidates from vector search
+MIN_SEMANTIC_SCORE = 0.3  # Minimum similarity score to consider
+
+# Phase 2: Multi-Signal Ranking Weights
+# These weights sum to 1.0 for final score calculation
+RANKING_WEIGHTS = {
+    "semantic": 0.5,   # Semantic similarity score weight
+    "type": 0.25,      # Memory type priority weight
+    "recency": 0.25,   # Recency score weight
+}
+
+# Memory type priorities for ranking (higher = more important)
+TYPE_PRIORITIES = {
+    "constraint": 1.0,    # Constraints are critical
+    "instruction": 0.95,  # Instructions are very important
+    "preference": 0.7,    # Preferences are valuable
+    "entity": 0.6,        # Entities for context
+    "commitment": 0.8,    # Commitments are time-sensitive
+    "fact": 0.5,          # Facts are general info
+    "event": 0.4,         # Events are context
+}
+
+# Recency decay configuration
+RECENCY_DECAY_RATE = 0.1  # Decay factor per turn (exponential decay)
+RECENCY_MAX_TURNS = 100   # After this many turns, recency score approaches 0
 
 # Redis Key Prefixes
 REDIS_MEMORY_PREFIX = "mem:"

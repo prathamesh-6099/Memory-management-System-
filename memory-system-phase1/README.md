@@ -1,11 +1,12 @@
-# Long-Form Memory System - Phase 1
+# Long-Form Memory System - Phase 1 & Phase 2
 
 A production-grade memory system for AI agents that enables accurate recall across 1,000+ conversation turns.
 
 ## What This Is
 
-This is **Phase 1** of a 6-phase implementation plan for a complete long-form memory system. Phase 1 provides a working end-to-end prototype with:
+This is **Phase 1 & Phase 2** of a 6-phase implementation plan for a complete long-form memory system.
 
+### Phase 1 Features:
 - ✅ Flat file storage for Core Memory (always-injected user identity)
 - ✅ Redis storage for Long-Term Memory (persistent across sessions)
 - ✅ Two-stage extraction pipeline (heuristic filter + pattern-based classifier)
@@ -13,12 +14,18 @@ This is **Phase 1** of a 6-phase implementation plan for a complete long-form me
 - ✅ Automated deduplication
 - ✅ Full memory pipeline: Extract → Store → Retrieve → Inject
 
+### Phase 2 Features (NEW):
+- ✅ Vector store (Qdrant) for semantic search
+- ✅ Embedding generation with sentence-transformers
+- ✅ Semantic similarity search
+- ✅ Multi-signal ranking (semantic + type + recency)
+
 ## Quick Start
 
 ### 1. Prerequisites
 
 - Python 3.8+
-- Docker and Docker Compose (for Redis)
+- Docker and Docker Compose (for Redis and Qdrant)
 
 ### 2. Setup
 
@@ -29,33 +36,38 @@ cd memory-system
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Start Redis
+# Start Redis and Qdrant
 docker-compose up -d
 
-# Verify Redis is running
+# Verify services are running
 docker-compose ps
 ```
 
 ### 3. Run the Demo
 
 ```bash
+# Phase 1 demo (basic retrieval)
 python demo.py
+
+# Phase 2 demo (semantic search)
+python demo_phase2.py
 ```
 
-The demo will:
-1. Simulate a 20-turn conversation
-2. Extract and store memories
-3. Test retrieval with different queries
-4. Show statistics and final state
+The Phase 2 demo will:
+1. Simulate a conversation with rich information
+2. Extract and store memories with embeddings
+3. Test semantic similarity search
+4. Demonstrate multi-signal ranking
 
 ## Project Structure
 
 ```
 memory-system/
-├── docker-compose.yml          # Redis setup
+├── docker-compose.yml          # Redis + Qdrant setup
 ├── redis.conf                  # Redis configuration (AOF persistence)
 ├── requirements.txt            # Python dependencies
-├── demo.py                     # Demo script
+├── demo.py                     # Phase 1 demo script
+├── demo_phase2.py              # Phase 2 demo script
 ├── memory/                     # Flat file storage
 │   └── user_1/                # Per-user directory
 │       ├── CORE.md            # Core identity (always injected)
@@ -68,8 +80,10 @@ memory-system/
     ├── flat_file_store.py     # Flat file storage layer
     ├── redis_store.py         # Redis storage layer
     ├── extractor.py           # Memory extraction (Stage 1 & 2)
-    ├── retriever.py           # Memory retrieval
-    └── memory_system.py       # Main orchestrator
+    ├── retriever.py           # Memory retrieval (with semantic search)
+    ├── memory_system.py       # Main orchestrator
+    ├── embedding_service.py   # Phase 2: Embedding generation
+    └── vector_store.py        # Phase 2: Qdrant vector store
 ```
 
 ## Usage
@@ -161,13 +175,35 @@ print(f"Memories by type: {stats['memories_by_type']}")
 - Not yet implemented
 - Will use LLM for complex extraction
 
-### Retrieval Strategy (Phase 1)
+### Retrieval Strategy
 
+#### Phase 1 (Basic Retrieval)
 1. **Always-On Types**: constraint, instruction (always retrieved)
 2. **Recency**: Recent memories with exponential decay
 3. **Priority Types**: User-specified types to prioritize
 
-**Phase 2** will add semantic similarity search using embeddings.
+#### Phase 2 (Semantic Search + Multi-Signal Ranking)
+
+Phase 2 uses a **multi-signal ranking** formula that combines three signals:
+
+```
+final_score = w_semantic × semantic_score + w_type × type_priority + w_recency × recency_score
+```
+
+| Signal | Weight | Description |
+|--------|--------|-------------|
+| **Semantic** | 0.5 | Cosine similarity between query and memory embeddings |
+| **Type Priority** | 0.25 | Memory type importance (constraints > instructions > preferences) |
+| **Recency** | 0.25 | Exponential decay based on turns since memory creation |
+
+**Type Priority Values:**
+- constraint: 1.0 (highest - safety critical)
+- instruction: 0.95 (behavioral guidance)
+- commitment: 0.8 (time-sensitive)
+- preference: 0.7 (user experience)
+- entity: 0.6 (context)
+- fact: 0.5 (general knowledge)
+- event: 0.4 (lowest)
 
 ### Deduplication
 
@@ -179,6 +215,8 @@ print(f"Memories by type: {stats['memories_by_type']}")
 
 All tunable parameters are in `src/config.py`:
 
+### Phase 1 Parameters
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `SENSORY_FILTER_THRESHOLD` | 0.3 | Minimum score to pass heuristic filter |
@@ -187,8 +225,23 @@ All tunable parameters are in `src/config.py`:
 | `MEMORY_TOKEN_BUDGET` | 500 | Max tokens for retrieved memories |
 | `CORE_MEMORY_TOKEN_BUDGET` | 500 | Max tokens for core memory |
 
-## What's Implemented (Phase 1)
+### Phase 2 Parameters
 
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `SEMANTIC_SEARCH_ENABLED` | True | Enable/disable semantic search |
+| `SEMANTIC_SEARCH_LIMIT` | 20 | Number of candidates from vector search |
+| `MIN_SEMANTIC_SCORE` | 0.3 | Minimum similarity score threshold |
+| `QDRANT_HOST` | localhost | Qdrant server host |
+| `QDRANT_PORT` | 6333 | Qdrant server port |
+| `EMBEDDING_MODEL` | all-MiniLM-L6-v2 | Sentence-transformers model |
+| `RANKING_WEIGHTS.semantic` | 0.5 | Weight for semantic similarity |
+| `RANKING_WEIGHTS.type` | 0.25 | Weight for type priority |
+| `RANKING_WEIGHTS.recency` | 0.25 | Weight for recency score |
+
+## What's Implemented
+
+### Phase 1
 - ✅ Flat file storage with human-editable Markdown
 - ✅ Redis storage with AOF persistence
 - ✅ Two-stage extraction (heuristic + pattern classifier)
@@ -198,13 +251,15 @@ All tunable parameters are in `src/config.py`:
 - ✅ Full pipeline orchestration
 - ✅ Statistics and monitoring
 
-## What's Coming Next
+### Phase 2 (NEW)
+- ✅ Vector store (Qdrant) for semantic embeddings
+- ✅ Embedding generation with sentence-transformers (all-MiniLM-L6-v2)
+- ✅ Semantic similarity search
+- ✅ Multi-signal ranking (semantic + type + recency)
+- ✅ Configurable ranking weights
+- ✅ Graceful fallback to Phase 1 if Qdrant unavailable
 
-### Phase 2 (Weeks 3-4)
-- Vector store (pgvector or Qdrant)
-- Embedding generation
-- Semantic similarity search
-- Multi-signal ranking (semantic + type + recency)
+## What's Coming Next
 
 ### Phase 3 (Weeks 5-6)
 - LLM-based extraction (Stage 3)
@@ -255,6 +310,24 @@ docker-compose up -d
 docker-compose ps  # Should show redis as "Up"
 ```
 
+### Qdrant Connection Error (Phase 2)
+
+```
+Failed to connect to Qdrant
+```
+
+**Solution**: Make sure Qdrant is running:
+```bash
+docker-compose up -d
+docker-compose ps  # Should show qdrant as "Up"
+```
+
+If Qdrant is not available, the system will automatically fall back to Phase 1 mode (non-semantic retrieval).
+
+### Slow First Query (Phase 2)
+
+The first query after startup may take a few seconds as the embedding model (all-MiniLM-L6-v2) is loaded. Subsequent queries will be much faster.
+
 ### No Memories Extracted
 
 If the demo shows 0 memories extracted, check:
@@ -268,6 +341,7 @@ If memories are stored but not retrieved:
 1. Check retrieval strategy in `retriever.py`
 2. Verify memory types match priority types
 3. Check token budget limits
+4. (Phase 2) Check `MIN_SEMANTIC_SCORE` threshold
 
 ## Architecture Notes
 

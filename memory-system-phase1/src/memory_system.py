@@ -1,6 +1,7 @@
 """
-Main Memory System - Phase 1
+Main Memory System - Phase 1 & Phase 2
 Orchestrates the full pipeline: Extract → Store → Retrieve → Inject
+Phase 2 adds: Vector store, embeddings, semantic search, multi-signal ranking
 """
 
 import logging
@@ -10,8 +11,29 @@ from .flat_file_store import FlatFileStore
 from .redis_store import RedisStore
 from .extractor import MemoryExtractor
 from .retriever import MemoryRetriever
+from .config import SEMANTIC_SEARCH_ENABLED
 
 logger = logging.getLogger(__name__)
+
+# Lazy import for optional Phase 2 components
+_vector_store_class = None
+_embedding_service_class = None
+
+
+def _load_phase2_components():
+    """Lazy load Phase 2 components (vector store and embeddings)"""
+    global _vector_store_class, _embedding_service_class
+    if _vector_store_class is None:
+        try:
+            from .vector_store import VectorStore
+            from .embedding_service import EmbeddingService
+            _vector_store_class = VectorStore
+            _embedding_service_class = EmbeddingService
+            return True
+        except ImportError as e:
+            logger.warning(f"Phase 2 components not available: {e}")
+            return False
+    return True
 
 
 class MemorySystem:
@@ -20,31 +42,59 @@ class MemorySystem:
     
     Pipeline:
     1. EXTRACT - Identify what's worth remembering (per turn)
-    2. STORE - Persist memories (flat files + Redis)
-    3. RETRIEVE - Find relevant memories (per turn)
+    2. STORE - Persist memories (flat files + Redis + Vector store)
+    3. RETRIEVE - Find relevant memories (semantic + type + recency)
     4. INJECT - Compose into prompt
     5. RESPOND - Generate response (external LLM call)
+    
+    Phase 2 adds:
+    - Vector store (Qdrant) for semantic search
+    - Embedding generation for memories
+    - Multi-signal ranking combining semantic, type, and recency scores
     """
 
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str, enable_semantic_search: Optional[bool] = None):
         """
         Initialize memory system for a user.
         
         Args:
             user_id: Unique user identifier
+            enable_semantic_search: Override config to enable/disable semantic search
+                                   (None = use config default)
         """
         self.user_id = user_id
         self.turn_number = 0
+        
+        # Determine if semantic search should be enabled
+        use_semantic = enable_semantic_search if enable_semantic_search is not None else SEMANTIC_SEARCH_ENABLED
         
         # Initialize storage layers
         self.flat_file_store = FlatFileStore(user_id)
         self.redis_store = RedisStore()
         
+        # Initialize Phase 2 components if enabled
+        self.vector_store = None
+        self.embedding_service = None
+        self._semantic_enabled = False
+        
+        if use_semantic and _load_phase2_components():
+            try:
+                self.embedding_service = _embedding_service_class()
+                self.vector_store = _vector_store_class(embedding_service=self.embedding_service)
+                self._semantic_enabled = True
+                logger.info("Phase 2 semantic search enabled")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Phase 2 components: {e}")
+                logger.info("Falling back to Phase 1 mode (no semantic search)")
+        
         # Initialize processing modules
         self.extractor = MemoryExtractor()
-        self.retriever = MemoryRetriever(self.redis_store)
+        self.retriever = MemoryRetriever(
+            self.redis_store, 
+            vector_store=self.vector_store if self._semantic_enabled else None
+        )
         
-        logger.info(f"Initialized memory system for user {user_id}")
+        logger.info(f"Initialized memory system for user {user_id} (semantic={self._semantic_enabled})")
 
     def process_turn(
         self, 
@@ -81,14 +131,26 @@ class MemorySystem:
         extracted_memories = self.extractor.extract(user_message, self.turn_number)
         stats['extracted_count'] = len(extracted_memories)
         
-        # STEP 2: STORE - Persist extracted memories
+        # STEP 2: STORE - Persist extracted memories (Redis + Vector Store)
         stored_count = 0
+        vector_stored_count = 0
+        
         for memory in extracted_memories:
             success = self.redis_store.store_memory(memory)
             if success:
                 stored_count += 1
+                
+                # Phase 2: Also store in vector store for semantic search
+                if self._semantic_enabled and self.vector_store:
+                    try:
+                        self.vector_store.store_memory(memory)
+                        vector_stored_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to store memory in vector store: {e}")
         
         stats['stored_count'] = stored_count
+        stats['vector_stored_count'] = vector_stored_count
+        stats['semantic_enabled'] = self._semantic_enabled
         stats['total_memories'] = self.redis_store.count_memories()
         
         # STEP 3 & 4: RETRIEVE + INJECT - Get relevant memories and format for prompt
@@ -194,6 +256,7 @@ class MemorySystem:
             'total_memories': self.redis_store.count_memories(),
             'memories_by_type': {},
             'extraction_count': self.extractor.extraction_count,
+            'semantic_search_enabled': self._semantic_enabled,
         }
         
         # Count by type
@@ -203,12 +266,27 @@ class MemorySystem:
             if count > 0:
                 stats['memories_by_type'][mem_type] = count
         
+        # Phase 2: Add vector store stats
+        if self._semantic_enabled and self.vector_store:
+            try:
+                stats['vector_count'] = self.vector_store.count()
+            except Exception:
+                stats['vector_count'] = -1
+        
         return stats
 
     def clear_memories(self):
         """Clear all long-term memories (use with caution!)"""
         logger.warning(f"Clearing all memories for user {self.user_id}")
         self.redis_store.clear_all_memories()
+        
+        # Phase 2: Also clear vector store
+        if self._semantic_enabled and self.vector_store:
+            try:
+                self.vector_store.clear()
+                logger.info("Cleared vector store")
+            except Exception as e:
+                logger.warning(f"Failed to clear vector store: {e}")
 
     def health_check(self) -> Dict[str, bool]:
         """
@@ -217,7 +295,20 @@ class MemorySystem:
         Returns:
             Dictionary with status of each component
         """
-        return {
+        health = {
             'redis': self.redis_store.health_check(),
             'flat_files': self.flat_file_store.user_dir.exists(),
         }
+        
+        # Phase 2: Check vector store health
+        if self._semantic_enabled and self.vector_store:
+            try:
+                # Try to get count as health check
+                self.vector_store.count()
+                health['vector_store'] = True
+            except Exception:
+                health['vector_store'] = False
+        else:
+            health['vector_store'] = None  # Not enabled
+        
+        return health
