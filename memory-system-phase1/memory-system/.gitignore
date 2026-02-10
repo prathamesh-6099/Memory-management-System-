@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Redis
+redis_data/
+dump.rdb
+appendonly.aof
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Memory files (optionally track these)
+memory/*/
+!memory/user_1/
+
+# Distribution
+dist/
+build/
+*.egg-info/
