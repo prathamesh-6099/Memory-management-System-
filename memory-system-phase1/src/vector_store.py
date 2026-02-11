@@ -4,7 +4,7 @@ Qdrant-based vector storage for semantic similarity search
 """
 
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.exceptions import UnexpectedResponse
@@ -325,6 +325,45 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Failed to get vector count: {e}")
             return 0
+    
+    def find_similar_for_dedup(
+        self,
+        memory: Dict,
+        threshold: float = 0.92,
+        limit: int = 5
+    ) -> List[Tuple[str, float]]:
+        """
+        Find semantically similar memories for deduplication check.
+        
+        Args:
+            memory: New memory to check for duplicates
+            threshold: Minimum similarity score to consider duplicate
+            limit: Maximum number of candidates to return
+        
+        Returns:
+            List of (memory_id, similarity_score) tuples
+        """
+        # Generate embedding for the new memory
+        embedding = self.embedding_service.embed_memory(memory)
+        
+        # Search for similar memories of the same type
+        memory_type = memory.get('type')
+        memory_types = [memory_type] if memory_type else None
+        
+        results = self.search_by_vector(
+            query_vector=embedding,
+            limit=limit,
+            memory_types=memory_types,
+            min_score=threshold
+        )
+        
+        # Return simplified list
+        similar = [(r['memory_id'], r['score']) for r in results]
+        
+        if similar:
+            logger.info(f"Found {len(similar)} similar memories for dedup check")
+        
+        return similar
     
     def clear(self) -> bool:
         """

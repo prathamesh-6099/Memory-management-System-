@@ -1,6 +1,6 @@
 """
-Memory Retrieval - Phase 1 & Phase 2
-Type-based + recency-based retrieval with semantic search (Phase 2)
+Memory Retrieval - Phase 1, 2 & 3
+Type-based + recency-based retrieval with semantic search (Phase 2) and superseding filter (Phase 3)
 """
 
 import logging
@@ -30,6 +30,7 @@ class MemoryRetriever:
     
     Phase 1: Type priority + recency-based retrieval
     Phase 2: Adds semantic search + multi-signal ranking
+    Phase 3: Filters superseded memories
     """
 
     def __init__(self, redis_store: RedisStore, vector_store=None):
@@ -48,6 +49,33 @@ class MemoryRetriever:
             logger.info("Semantic search enabled for memory retrieval")
         else:
             logger.info("Using non-semantic retrieval (Phase 1 mode)")
+    
+    def _filter_superseded(self, memories: List[Dict]) -> List[Dict]:
+        """
+        Filter out memories that have been superseded.
+        
+        Args:
+            memories: List of memory dictionaries
+        
+        Returns:
+            Filtered list without superseded memories
+        """
+        active = []
+        superseded_count = 0
+        
+        for mem in memories:
+            superseded_by = mem.get('superseded_by')
+            # Check if superseded_by exists and is not None or empty string
+            if superseded_by and superseded_by not in [None, '', 'None']:
+                superseded_count += 1
+                logger.debug(f"Filtered superseded memory: {mem['memory_id']}")
+            else:
+                active.append(mem)
+        
+        if superseded_count > 0:
+            logger.info(f"Filtered out {superseded_count} superseded memories")
+        
+        return active
 
     def retrieve(
         self, 
@@ -177,6 +205,9 @@ class MemoryRetriever:
         # Sort by final score
         ranked_memories.sort(key=lambda m: m['retrieval_score'], reverse=True)
         
+        # Filter out superseded memories (Phase 3)
+        ranked_memories = self._filter_superseded(ranked_memories)
+        
         # Take top K
         top_memories = ranked_memories[:MAX_MEMORIES_TO_RETRIEVE]
         
@@ -251,6 +282,9 @@ class MemoryRetriever:
         
         # Rank by retrieval_score
         all_memories.sort(key=lambda m: m['retrieval_score'], reverse=True)
+        
+        # Filter out superseded memories (Phase 3)
+        all_memories = self._filter_superseded(all_memories)
         
         # Take top K
         top_memories = all_memories[:MAX_MEMORIES_TO_RETRIEVE]

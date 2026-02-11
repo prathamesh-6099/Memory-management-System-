@@ -1,10 +1,10 @@
-# Long-Form Memory System - Phase 1 & Phase 2
+# Long-Form Memory System - Phase 1, 2 & 3
 
 A production-grade memory system for AI agents that enables accurate recall across 1,000+ conversation turns.
 
 ## What This Is
 
-This is **Phase 1 & Phase 2** of a 6-phase implementation plan for a complete long-form memory system.
+This is **Phase 1, 2 & 3** of a 6-phase implementation plan for a complete long-form memory system.
 
 ### Phase 1 Features:
 - ✅ Flat file storage for Core Memory (always-injected user identity)
@@ -14,11 +14,19 @@ This is **Phase 1 & Phase 2** of a 6-phase implementation plan for a complete lo
 - ✅ Automated deduplication
 - ✅ Full memory pipeline: Extract → Store → Retrieve → Inject
 
-### Phase 2 Features (NEW):
+### Phase 2 Features:
 - ✅ Vector store (Qdrant) for semantic search
 - ✅ Embedding generation with sentence-transformers
 - ✅ Semantic similarity search
 - ✅ Multi-signal ranking (semantic + type + recency)
+
+### Phase 3 Features (NEW):
+- ✅ Stage 3 LLM-based extraction for complex cases
+- ✅ Multi-provider support (OpenAI, Anthropic, Groq)
+- ✅ Semantic deduplication using vector similarity
+- ✅ Memory updates and superseding
+- ✅ Confidence scoring with certainty modifiers
+- ✅ Confidence boosting for repeated mentions
 
 ## Quick Start
 
@@ -51,6 +59,14 @@ python demo.py
 
 # Phase 2 demo (semantic search)
 python demo_phase2.py
+
+# Phase 3 demo (LLM extraction, deduplication, updates)
+# First, set your LLM API key:
+# For Groq (fastest): set GROQ_API_KEY=your_key_here
+# For OpenAI: set OPENAI_API_KEY=your_key_here
+# For Anthropic: set ANTHROPIC_API_KEY=your_key_here
+
+python demo_phase3.py
 ```
 
 The Phase 2 demo will:
@@ -58,6 +74,13 @@ The Phase 2 demo will:
 2. Extract and store memories with embeddings
 3. Test semantic similarity search
 4. Demonstrate multi-signal ranking
+
+The Phase 3 demo will:
+1. Test LLM-based extraction for complex messages
+2. Demonstrate semantic deduplication (similarity > 0.92)
+3. Show memory updates and superseding
+4. Test confidence boosting for repeated information
+5. Verify superseded memories are filtered from retrieval
 
 ## Project Structure
 
@@ -68,6 +91,7 @@ memory-system/
 ├── requirements.txt            # Python dependencies
 ├── demo.py                     # Phase 1 demo script
 ├── demo_phase2.py              # Phase 2 demo script
+├── demo_phase3.py              # Phase 3 demo script (NEW)
 ├── memory/                     # Flat file storage
 │   └── user_1/                # Per-user directory
 │       ├── CORE.md            # Core identity (always injected)
@@ -78,8 +102,9 @@ memory-system/
     ├── __init__.py
     ├── config.py              # Configuration & tunable parameters
     ├── flat_file_store.py     # Flat file storage layer
-    ├── redis_store.py         # Redis storage layer
-    ├── extractor.py           # Memory extraction (Stage 1 & 2)
+    ├── redis_store.py         # Redis storage layer (Phase 3: + superseding)
+    ├── extractor.py           # Memory extraction (Stage 1, 2 & 3)
+    ├── llm_extractor.py       # Phase 3: LLM-based extraction (NEW)
     ├── retriever.py           # Memory retrieval (with semantic search)
     ├── memory_system.py       # Main orchestrator
     ├── embedding_service.py   # Phase 2: Embedding generation
@@ -158,7 +183,7 @@ print(f"Memories by type: {stats['memories_by_type']}")
    - Indexed by type and recency
    - ~500 tokens budget
 
-### Extraction Pipeline (Phase 1)
+### Extraction Pipeline (Phase 1 & 3)
 
 **Stage 1: Sensory Filter** (Heuristic)
 - Fast pattern matching
@@ -171,9 +196,12 @@ print(f"Memories by type: {stats['memories_by_type']}")
 - Assigns confidence scores
 - Types: preference, constraint, entity, instruction, commitment, fact
 
-**Stage 3: LLM Extraction** _(Phase 3)_
-- Not yet implemented
-- Will use LLM for complex extraction
+**Stage 3: LLM Extraction** _(Phase 3 - NEW)_
+- Uses OpenAI, Anthropic, or Groq for complex extraction
+- Escalates when Stage 2 confidence < 0.7 or no results
+- Structured JSON extraction with confidence scores
+- Detects memory updates and contradictions
+- Target latency: ~50-200ms (Groq), ~200-500ms (standard APIs)
 
 ### Retrieval Strategy
 
@@ -205,11 +233,20 @@ final_score = w_semantic × semantic_score + w_type × type_priority + w_recency
 - fact: 0.5 (general knowledge)
 - event: 0.4 (lowest)
 
-### Deduplication
+### Deduplication (Phase 1 & 3)
 
+**Phase 1: Key-Based Deduplication**
 - Redis dedup index: `{type}:{key}` → `memory_id`
 - Prevents storing identical memories
 - Updates recency of existing memories instead
+
+**Phase 3: Semantic Deduplication** _(NEW)_
+- Uses vector similarity (cosine score > 0.92 = duplicate)
+- Catches near-duplicates with different wording:
+  - "I prefer calls after 11 AM"
+  - "Call me after 11 in the morning"
+- Boosts confidence when repeated
+- Supersedes old memories when updates detected
 
 ## Configuration
 
@@ -239,6 +276,20 @@ All tunable parameters are in `src/config.py`:
 | `RANKING_WEIGHTS.type` | 0.25 | Weight for type priority |
 | `RANKING_WEIGHTS.recency` | 0.25 | Weight for recency score |
 
+### Phase 3 Parameters (NEW)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `STAGE_3_ENABLED` | False | Enable/disable LLM-based extraction |
+| `LLM_PROVIDER` | groq | LLM provider: "openai", "anthropic", "groq" |
+| `LLM_EXTRACTION_MODEL` | llama3-8b-8192 | Model for Stage 3 extraction |
+| `STAGE_3_CONFIDENCE_THRESHOLD` | 0.7 | Escalate to LLM if Stage 2 < this |
+| `SEMANTIC_DEDUP_ENABLED` | True | Enable semantic deduplication |
+| `SEMANTIC_DEDUP_THRESHOLD` | 0.92 | Similarity score to consider duplicate |
+| `MIN_CONFIDENCE_TO_STORE` | 0.6 | Discard memories below this confidence |
+| `CONFIDENCE_BOOST_PER_MENTION` | 0.1 | Boost confidence when repeated |
+| `MAX_CONFIDENCE` | 0.95 | Maximum confidence after boosts |
+
 ## What's Implemented
 
 ### Phase 1
@@ -251,7 +302,7 @@ All tunable parameters are in `src/config.py`:
 - ✅ Full pipeline orchestration
 - ✅ Statistics and monitoring
 
-### Phase 2 (NEW)
+### Phase 2
 - ✅ Vector store (Qdrant) for semantic embeddings
 - ✅ Embedding generation with sentence-transformers (all-MiniLM-L6-v2)
 - ✅ Semantic similarity search
@@ -259,17 +310,22 @@ All tunable parameters are in `src/config.py`:
 - ✅ Configurable ranking weights
 - ✅ Graceful fallback to Phase 1 if Qdrant unavailable
 
-## What's Coming Next
+### Phase 3 (NEW)
+- ✅ Stage 3 LLM-based extraction (OpenAI, Anthropic, Groq)
+- ✅ Escalation logic (low confidence → LLM)
+- ✅ Semantic deduplication using vector similarity
+- ✅ Memory superseding and update detection
+- ✅ Confidence modifiers (certainty words)
+- ✅ Confidence boosting for repeated mentions
+- ✅ Superseded memory filtering in retrieval
 
-### Phase 3 (Weeks 5-6)
-- LLM-based extraction (Stage 3)
-- Improved deduplication
-- Confidence scoring
+## What's Coming Next
 
 ### Phase 4 (Weeks 7-8)
 - Background consolidation worker
 - Memory merging and decay
 - Promotion to Core Memory
+- 5-signal ranking (add frequency + confidence signals)
 
 ### Phase 5 (Weeks 9-10)
 - Evaluation framework

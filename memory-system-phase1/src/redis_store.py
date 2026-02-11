@@ -1,12 +1,12 @@
 """
-Redis Storage Layer - Long-Term Memory
-Handles structured key-value storage with indices
+Redis Storage Layer - Long-Term Memory (Phase 3)
+Handles structured key-value storage with indices and semantic deduplication
 """
 
 import logging
 import json
 import time
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from datetime import datetime
 import redis
 
@@ -19,6 +19,9 @@ from .config import (
     REDIS_TYPE_INDEX_PREFIX,
     REDIS_RECENCY_INDEX,
     MEMORY_FIELDS,
+    SEMANTIC_DEDUP_ENABLED,
+    CONFIDENCE_BOOST_PER_MENTION,
+    MAX_CONFIDENCE,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,8 +50,7 @@ class RedisStore:
         Store a memory record in Redis with proper indexing.
         
         Args:
-            memory: Dictionary with keys: memory_id, type, key, value, 
-                   confidence, turn_number, timestamp, source_text
+            memory: Dictionary with all memory fields
         
         Returns:
             True if stored successfully, False if duplicate
@@ -57,19 +59,38 @@ class RedisStore:
         memory_type = memory['type']
         memory_key = memory.get('key', '')
         
-        # Check for duplicates using dedup key
+        # Check for key-based duplicates (Phase 1)
         dedup_key = f"{REDIS_DEDUP_PREFIX}{memory_type}:{memory_key}"
         existing = self.client.get(dedup_key)
         
         if existing:
-            logger.debug(f"Duplicate memory found: {dedup_key} -> {existing}")
-            # Update the existing memory's recency
+            logger.debug(f"Key-based duplicate found: {dedup_key} -> {existing}")
+            # Update existing memory's recency and boost confidence
             self._update_recency(existing, memory['timestamp'])
+            self.boost_confidence(existing)
             return False
+        
+        # Ensure Phase 3 fields have defaults (Redis-compatible)
+        memory.setdefault('mention_count', 1)
+        memory.setdefault('superseded_by', '')  # Empty string instead of None
+        memory.setdefault('supersedes', '')     # Empty string instead of None
+        memory.setdefault('is_update', False)
+        memory.setdefault('last_accessed_turn', memory.get('turn_number', 0))
+        
+        # Convert None values to empty strings for Redis compatibility
+        memory_to_store = {}
+        for key, value in memory.items():
+            if value is None:
+                memory_to_store[key] = ''
+            elif isinstance(value, bool):
+                # Convert boolean to string for Redis
+                memory_to_store[key] = str(value)
+            else:
+                memory_to_store[key] = value
         
         # Store the full memory record as a hash
         redis_key = f"{REDIS_MEMORY_PREFIX}{memory_id}"
-        self.client.hset(redis_key, mapping=memory)
+        self.client.hset(redis_key, mapping=memory_to_store)
         
         # Create dedup entry
         if memory_key:
@@ -108,6 +129,19 @@ class RedisStore:
             memory['turn_number'] = int(memory['turn_number'])
         if 'timestamp' in memory:
             memory['timestamp'] = float(memory['timestamp'])
+        if 'mention_count' in memory:
+            memory['mention_count'] = int(memory['mention_count'])
+        if 'last_accessed_turn' in memory:
+            memory['last_accessed_turn'] = int(memory['last_accessed_turn'])
+        if 'is_update' in memory:
+            # Convert string back to boolean
+            memory['is_update'] = memory['is_update'] in ['True', 'true', '1', True]
+        
+        # Convert empty strings back to None for Phase 3 fields
+        if 'superseded_by' in memory and memory['superseded_by'] == '':
+            memory['superseded_by'] = None
+        if 'supersedes' in memory and memory['supersedes'] == '':
+            memory['supersedes'] = None
         
         return memory
 
@@ -200,6 +234,101 @@ class RedisStore:
         
         logger.info(f"Deleted memory {memory_id}")
         return True
+    
+    def supersede_memory(self, old_memory_id: str, new_memory_id: str) -> bool:
+        """
+        Mark an old memory as superseded by a new one.
+        
+        Args:
+            old_memory_id: Memory to be superseded
+            new_memory_id: Memory that supersedes the old one
+        
+        Returns:
+            True if successful
+        """
+        old_memory = self.get_memory(old_memory_id)
+        new_memory = self.get_memory(new_memory_id)
+        
+        if not old_memory or not new_memory:
+            logger.warning("Can't supersede: memory not found")
+            return False
+        
+        # Update old memory (use actual memory_id, not empty string)
+        old_redis_key = f"{REDIS_MEMORY_PREFIX}{old_memory_id}"
+        self.client.hset(old_redis_key, "superseded_by", new_memory_id)
+        
+        # Update new memory (use actual memory_id, not empty string)
+        new_redis_key = f"{REDIS_MEMORY_PREFIX}{new_memory_id}"
+        self.client.hset(new_redis_key, "supersedes", old_memory_id)
+        
+        logger.info(f"Memory {old_memory_id} superseded by {new_memory_id}")
+        return True
+    
+    def boost_confidence(self, memory_id: str) -> bool:
+        """
+        Boost confidence of a memory when it's mentioned again.
+        
+        Args:
+            memory_id: Memory to boost
+        
+        Returns:
+            True if successful
+        """
+        memory = self.get_memory(memory_id)
+        if not memory:
+            return False
+        
+        # Increment mention count
+        redis_key = f"{REDIS_MEMORY_PREFIX}{memory_id}"
+        mention_count = int(memory.get('mention_count', 1)) + 1
+        self.client.hset(redis_key, "mention_count", mention_count)
+        
+        # Boost confidence
+        current_confidence = float(memory.get('confidence', 0.5))
+        new_confidence = min(current_confidence + CONFIDENCE_BOOST_PER_MENTION, MAX_CONFIDENCE)
+        self.client.hset(redis_key, "confidence", new_confidence)
+        
+        logger.info(
+            f"Boosted memory {memory_id}: mentions={mention_count}, "
+            f"confidence={current_confidence:.2f}→{new_confidence:.2f}"
+        )
+        return True
+    
+    def update_memory_field(self, memory_id: str, field: str, value: any) -> bool:
+        """
+        Update a specific field of a memory.
+        
+        Args:
+            memory_id: Memory to update
+            field: Field name
+            value: New value
+        
+        Returns:
+            True if successful
+        """
+        memory = self.get_memory(memory_id)
+        if not memory:
+            return False
+        
+        redis_key = f"{REDIS_MEMORY_PREFIX}{memory_id}"
+        self.client.hset(redis_key, field, value)
+        
+        logger.debug(f"Updated memory {memory_id}: {field}={value}")
+        return True
+    
+    def get_memories_by_type_and_key(self, memory_type: str, key: str) -> List[Dict]:
+        """
+        Find memories with specific type and key.
+        
+        Args:
+            memory_type: Memory type
+            key: Memory key
+        
+        Returns:
+            List of matching memories
+        """
+        all_of_type = self.get_memories_by_type(memory_type, limit=1000)
+        return [m for m in all_of_type if m.get('key') == key]
 
     def clear_all_memories(self):
         """Clear all memories (use with caution!)"""
