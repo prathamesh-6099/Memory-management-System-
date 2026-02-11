@@ -1,17 +1,24 @@
 """
-Main Memory System - Phase 1 & Phase 2
+Main Memory System - Phase 1, 2 & 3
 Orchestrates the full pipeline: Extract → Store → Retrieve → Inject
 Phase 2 adds: Vector store, embeddings, semantic search, multi-signal ranking
+Phase 3 adds: LLM extraction, semantic deduplication, update detection
 """
 
 import logging
+import time
 from typing import Dict, List, Optional, Tuple
 
 from .flat_file_store import FlatFileStore
 from .redis_store import RedisStore
 from .extractor import MemoryExtractor
 from .retriever import MemoryRetriever
-from .config import SEMANTIC_SEARCH_ENABLED
+from .config import (
+    SEMANTIC_SEARCH_ENABLED,
+    SEMANTIC_DEDUP_ENABLED,
+    SEMANTIC_DEDUP_THRESHOLD,
+    SEMANTIC_DEDUP_CHECK_LIMIT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +48,23 @@ class MemorySystem:
     Complete memory system orchestrating all layers.
     
     Pipeline:
-    1. EXTRACT - Identify what's worth remembering (per turn)
+    1. EXTRACT - Identify what's worth remembering (Stages 1-3)
     2. STORE - Persist memories (flat files + Redis + Vector store)
-    3. RETRIEVE - Find relevant memories (semantic + type + recency)
-    4. INJECT - Compose into prompt
-    5. RESPOND - Generate response (external LLM call)
+    3. DEDUPLICATE - Check for semantic duplicates (Phase 3)
+    4. RETRIEVE - Find relevant memories (semantic + type + recency)
+    5. INJECT - Compose into prompt
+    6. RESPOND - Generate response (external LLM call)
     
     Phase 2 adds:
     - Vector store (Qdrant) for semantic search
     - Embedding generation for memories
     - Multi-signal ranking combining semantic, type, and recency scores
+    
+    Phase 3 adds:
+    - Stage 3 LLM extraction for complex cases
+    - Semantic deduplication using vector similarity
+    - Memory superseding and updates
+    - Confidence boosting for repeated mentions
     """
 
     def __init__(self, user_id: str, enable_semantic_search: Optional[bool] = None):
@@ -125,39 +139,81 @@ class MemorySystem:
             'stored_count': 0,
             'retrieved_count': 0,
             'total_memories': 0,
+            'extraction_time_ms': 0.0,
+            'storage_time_ms': 0.0,
+            'retrieval_time_ms': 0.0,
         }
         
         # STEP 1: EXTRACT - Identify memories from this message
+        extract_start = time.time()
         extracted_memories = self.extractor.extract(user_message, self.turn_number)
+        stats['extraction_time_ms'] = (time.time() - extract_start) * 1000
         stats['extracted_count'] = len(extracted_memories)
         
-        # STEP 2: STORE - Persist extracted memories (Redis + Vector Store)
+        # STEP 2 & 3: STORE + DEDUPLICATE - Persist extracted memories with deduplication
+        storage_start = time.time()
         stored_count = 0
         vector_stored_count = 0
+        dedup_count = 0
+        superseded_count = 0
         
         for memory in extracted_memories:
-            success = self.redis_store.store_memory(memory)
-            if success:
-                stored_count += 1
+            # Phase 3: Semantic deduplication check
+            should_store = True
+            duplicate_id = None
+            
+            if SEMANTIC_DEDUP_ENABLED and self._semantic_enabled and self.vector_store:
+                duplicate_id = self._check_semantic_duplicate(memory)
                 
-                # Phase 2: Also store in vector store for semantic search
-                if self._semantic_enabled and self.vector_store:
-                    try:
-                        self.vector_store.store_memory(memory)
-                        vector_stored_count += 1
-                    except Exception as e:
-                        logger.warning(f"Failed to store memory in vector store: {e}")
+                if duplicate_id:
+                    dedup_count += 1
+                    should_store = False
+                    
+                    # If this is marked as an update, supersede the duplicate
+                    if memory.get('is_update', False):
+                        # Store the new memory
+                        should_store = True
+                        # Supersede the old one after storing
+                        logger.info(f"Update detected: will supersede {duplicate_id}")
+                    else:
+                        # Just boost confidence of existing memory
+                        self.redis_store.boost_confidence(duplicate_id)
+                        logger.info(f"Duplicate found: boosted confidence of {duplicate_id}")
+            
+            # Store if not a duplicate or if it's an update
+            if should_store:
+                success = self.redis_store.store_memory(memory)
+                if success:
+                    stored_count += 1
+                    
+                    # Supersede old memory if this is an update
+                    if duplicate_id and memory.get('is_update', False):
+                        self.redis_store.supersede_memory(duplicate_id, memory['memory_id'])
+                        superseded_count += 1
+                    
+                    # Phase 2: Also store in vector store for semantic search
+                    if self._semantic_enabled and self.vector_store:
+                        try:
+                            self.vector_store.store_memory(memory)
+                            vector_stored_count += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to store memory in vector store: {e}")
         
         stats['stored_count'] = stored_count
         stats['vector_stored_count'] = vector_stored_count
+        stats['dedup_count'] = dedup_count
+        stats['superseded_count'] = superseded_count
         stats['semantic_enabled'] = self._semantic_enabled
         stats['total_memories'] = self.redis_store.count_memories()
+        stats['storage_time_ms'] = (time.time() - storage_start) * 1000
         
-        # STEP 3 & 4: RETRIEVE + INJECT - Get relevant memories and format for prompt
+        # STEP 4 & 5: RETRIEVE + INJECT - Get relevant memories and format for prompt
+        retrieval_start = time.time()
         memory_context = self._compose_prompt_context(
             user_message, 
             priority_types
         )
+        stats['retrieval_time_ms'] = (time.time() - retrieval_start) * 1000
         
         # Count retrieved memories (rough estimate from formatted text)
         stats['retrieved_count'] = memory_context.count('\n- ') if memory_context else 0
@@ -171,6 +227,38 @@ class MemorySystem:
         )
         
         return memory_context, stats
+    
+    def _check_semantic_duplicate(self, memory: Dict) -> Optional[str]:
+        """
+        Check if a memory is a semantic duplicate of existing memories.
+        
+        Args:
+            memory: New memory to check
+        
+        Returns:
+            memory_id of duplicate if found, None otherwise
+        """
+        try:
+            similar = self.vector_store.find_similar_for_dedup(
+                memory=memory,
+                threshold=SEMANTIC_DEDUP_THRESHOLD,
+                limit=SEMANTIC_DEDUP_CHECK_LIMIT
+            )
+            
+            if similar:
+                # Return the most similar memory's ID
+                duplicate_id, score = similar[0]
+                logger.info(
+                    f"Semantic duplicate detected: {duplicate_id} "
+                    f"(similarity={score:.3f}, threshold={SEMANTIC_DEDUP_THRESHOLD})"
+                )
+                return duplicate_id
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Semantic dedup check failed: {e}")
+            return None
 
     def _compose_prompt_context(
         self, 

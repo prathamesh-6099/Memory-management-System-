@@ -1,10 +1,15 @@
 """
-Configuration for the Memory System - Phase 1 & Phase 2
+Configuration for the Memory System - Phase 1, 2 & 3
 All tunable parameters from Section 12 of the spec
 """
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file in the project root
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -101,7 +106,66 @@ MEMORY_FIELDS = [
     "turn_number",
     "timestamp",
     "source_text",
+    "mention_count",     # Phase 3: Track repetitions for confidence boost
+    "superseded_by",     # Phase 3: ID of memory that supersedes this one
+    "supersedes",        # Phase 3: ID of memory this one supersedes
+    "is_update",         # Phase 3: Flag if this is an update to existing memory
+    "last_accessed_turn",  # Phase 3: For frequency tracking
 ]
+
+# Phase 3: Stage 3 LLM Extraction Configuration
+STAGE_3_ENABLED = True  # Enable/disable LLM-based extraction
+LLM_PROVIDER = "groq"  # "openai" | "anthropic" | "groq"
+LLM_EXTRACTION_MODEL = os.getenv("LLM_EXTRACTION_MODEL", "llama-3.3-70b-versatile")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+STAGE_3_CONFIDENCE_THRESHOLD = 0.7  # Escalate to LLM if Stage 2 < this
+STAGE_3_MAX_TOKENS = 200  # Max tokens for LLM extraction response
+STAGE_3_TEMPERATURE = 0.1  # Low temperature for consistent extraction
+
+# Phase 3: Semantic Deduplication Configuration
+SEMANTIC_DEDUP_ENABLED = True  # Enable/disable semantic deduplication
+SEMANTIC_DEDUP_THRESHOLD = 0.92  # Similarity score to consider duplicate
+SEMANTIC_DEDUP_CHECK_LIMIT = 5  # Check top N similar memories for duplicates
+
+# Phase 3: Confidence Scoring Configuration
+MIN_CONFIDENCE_TO_STORE = 0.6  # Discard memories below this confidence
+HIGH_CONFIDENCE_THRESHOLD = 0.9  # Candidate for core memory promotion
+CONFIDENCE_BOOST_PER_MENTION = 0.1  # Boost confidence when repeated
+MAX_CONFIDENCE = 0.95  # Maximum confidence after boosts
+LOW_CONFIDENCE_DECAY_RATE = 0.1  # Reduce confidence of unused memories
+LOW_CONFIDENCE_DECAY_TURNS = 200  # After this many turns, apply decay
+
+# Phase 3: Update Detection Patterns
+UPDATE_PATTERNS = [
+    r"actually[,\s]+(.+)",
+    r"i changed my mind[,\s]+(.+)",
+    r"not anymore[,\s]+(.+)",
+    r"i used to .+ but now (.+)",
+    r"correction[,:\s]+(.+)",
+    r"i meant[,:\s]+(.+)",
+    r"let me correct that[,:\s]+(.+)",
+]
+
+# Phase 3: Confidence Modifiers
+CONFIDENCE_MODIFIERS = {
+    # Certainty boosters
+    "always": 0.1,
+    "never": 0.1,
+    "definitely": 0.1,
+    "absolutely": 0.1,
+    "must": 0.1,
+    
+    # Certainty reducers
+    "maybe": -0.2,
+    "perhaps": -0.2,
+    "possibly": -0.2,
+    "might": -0.2,
+    "sometimes": -0.15,
+    "occasionally": -0.15,
+    "could": -0.15,
+}
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

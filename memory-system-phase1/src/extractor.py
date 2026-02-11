@@ -1,6 +1,8 @@
 """
-Memory Extraction - Phase 1 (Stage 1 & 2 only)
-Heuristic filter + Simple classifier (no LLM yet)
+Memory Extraction - Phase 1, 2 & 3
+Stage 1: Heuristic filter
+Stage 2: Pattern-based classifier
+Stage 3: LLM-based extraction (optional)
 """
 
 import logging
@@ -15,16 +17,39 @@ from .config import (
     HEURISTIC_WEIGHTS,
     EXTRACTION_KEYWORDS,
     MEMORY_TYPES,
+    STAGE_3_ENABLED,
+    STAGE_3_CONFIDENCE_THRESHOLD,
+    MIN_CONFIDENCE_TO_STORE,
+    CONFIDENCE_MODIFIERS,
 )
 
 logger = logging.getLogger(__name__)
 
+# Lazy import for Stage 3
+_llm_extractor = None
+
+
+def _get_llm_extractor():
+    """Lazy load LLM extractor"""
+    global _llm_extractor
+    if _llm_extractor is None and STAGE_3_ENABLED:
+        try:
+            from .llm_extractor import LLMExtractor
+            _llm_extractor = LLMExtractor()
+            logger.info("Stage 3 LLM extractor loaded")
+        except Exception as e:
+            logger.warning(f"Failed to load Stage 3 extractor: {e}")
+    return _llm_extractor
+
 
 class MemoryExtractor:
-    """Extracts memories from user messages using heuristic + simple classifier"""
+    """Extracts memories from user messages using multi-stage pipeline"""
 
     def __init__(self):
         self.extraction_count = 0
+        self.stage3_enabled = STAGE_3_ENABLED
+        self.llm_extractor = _get_llm_extractor() if self.stage3_enabled else None
+        self.context_buffer = []  # Store last 3 turns for Stage 3 context
 
     def should_extract(self, message: str) -> Tuple[bool, float]:
         """
@@ -241,6 +266,18 @@ class MemoryExtractor:
         
         return memories
 
+    def _apply_confidence_modifiers(self, confidence: float, text: str) -> float:
+        """Apply confidence modifiers based on certainty words"""
+        text_lower = text.lower()
+        
+        for word, modifier in CONFIDENCE_MODIFIERS.items():
+            if word in text_lower:
+                confidence += modifier
+                logger.debug(f"Confidence modifier '{word}': {modifier:+.2f}")
+        
+        # Clamp to [0, 1]
+        return max(0.0, min(1.0, confidence))
+    
     def _create_memory(
         self,
         memory_type: str,
@@ -250,8 +287,12 @@ class MemoryExtractor:
         turn_number: int,
         timestamp: float,
         source_text: str,
+        is_update: bool = False,
     ) -> Dict:
         """Create a structured memory record"""
+        # Apply confidence modifiers
+        confidence = self._apply_confidence_modifiers(confidence, source_text)
+        
         return {
             "memory_id": f"mem_{uuid.uuid4().hex[:8]}",
             "type": memory_type,
@@ -261,11 +302,16 @@ class MemoryExtractor:
             "turn_number": turn_number,
             "timestamp": timestamp,
             "source_text": source_text,
+            "mention_count": 1,
+            "superseded_by": '',  # Empty string instead of None
+            "supersedes": '',     # Empty string instead of None
+            "is_update": is_update,
+            "last_accessed_turn": turn_number,
         }
 
     def extract(self, message: str, turn_number: int) -> List[Dict]:
         """
-        Full extraction pipeline (Phase 1 version)
+        Full extraction pipeline (Phase 1, 2 & 3)
         
         Args:
             message: User's message
@@ -274,6 +320,11 @@ class MemoryExtractor:
         Returns:
             List of extracted memories (empty if filtered out)
         """
+        # Update context buffer for Stage 3
+        self.context_buffer.append(message)
+        if len(self.context_buffer) > 3:
+            self.context_buffer.pop(0)
+        
         # Stage 1: Sensory filter
         should_process, heuristic_score = self.should_extract(message)
         
@@ -282,19 +333,81 @@ class MemoryExtractor:
             return []
         
         # Stage 2: Classify and extract
-        memories = self.classify_and_extract(message, turn_number)
+        stage2_memories = self.classify_and_extract(message, turn_number)
         
-        # Filter by classifier confidence
+        # Check if we should escalate to Stage 3
+        should_use_stage3 = False
+        stage2_hint = None
+        
+        if self.stage3_enabled and self.llm_extractor:
+            # Escalate if Stage 2 has low confidence or no results
+            if not stage2_memories:
+                should_use_stage3 = heuristic_score > 0.5  # Message looks important
+                logger.debug("Escalating to Stage 3: no Stage 2 results")
+            elif stage2_memories:
+                max_confidence = max(m['confidence'] for m in stage2_memories)
+                if max_confidence < STAGE_3_CONFIDENCE_THRESHOLD:
+                    should_use_stage3 = True
+                    stage2_hint = stage2_memories[0]['type']  # Hint from Stage 2
+                    logger.debug(f"Escalating to Stage 3: low confidence ({max_confidence:.2f})")
+        
+        # Stage 3: LLM extraction (if needed)
+        if should_use_stage3:
+            try:
+                stage3_memories = self.llm_extractor.extract(
+                    message=message,
+                    turn_number=turn_number,
+                    context_turns=self.context_buffer[:-1],  # Exclude current message
+                    stage2_hint=stage2_hint
+                )
+                
+                # Merge Stage 2 and Stage 3, preferring Stage 3 if higher confidence
+                memories = self._merge_stage_results(stage2_memories, stage3_memories)
+            except Exception as e:
+                logger.error(f"Stage 3 failed, falling back to Stage 2: {e}")
+                memories = stage2_memories
+        else:
+            memories = stage2_memories
+        
+        # Filter by minimum confidence threshold
         high_confidence_memories = [
             m for m in memories 
-            if m['confidence'] >= EXTRACTION_CLASSIFIER_THRESHOLD
+            if m['confidence'] >= MIN_CONFIDENCE_TO_STORE
         ]
         
         logger.info(
             f"Turn {turn_number}: Extracted {len(high_confidence_memories)}/{len(memories)} "
-            f"high-confidence memories (heuristic={heuristic_score:.2f})"
+            f"memories (heuristic={heuristic_score:.2f}, stage3={should_use_stage3})"
         )
         
         self.extraction_count += len(high_confidence_memories)
         
         return high_confidence_memories
+    
+    def _merge_stage_results(self, stage2: List[Dict], stage3: List[Dict]) -> List[Dict]:
+        """
+        Merge Stage 2 and Stage 3 results, preferring Stage 3 when there's overlap.
+        
+        Args:
+            stage2: Memories from Stage 2
+            stage3: Memories from Stage 3
+        
+        Returns:
+            Merged list of memories
+        """
+        merged = {}
+        
+        # Add Stage 2 memories
+        for mem in stage2:
+            key = (mem['type'], mem['key'])
+            merged[key] = mem
+        
+        # Override with Stage 3 if higher confidence
+        for mem in stage3:
+            key = (mem['type'], mem['key'])
+            if key not in merged or mem['confidence'] > merged[key]['confidence']:
+                merged[key] = mem
+                if key in merged:
+                    logger.debug(f"Stage 3 overrode Stage 2 for {key}")
+        
+        return list(merged.values())
