@@ -1,8 +1,9 @@
 """
-Main Memory System - Phase 1, 2 & 3
+Main Memory System - Phase 1, 2, 3 & 4
 Orchestrates the full pipeline: Extract → Store → Retrieve → Inject
 Phase 2 adds: Vector store, embeddings, semantic search, multi-signal ranking
 Phase 3 adds: LLM extraction, semantic deduplication, update detection
+Phase 4 adds: Background consolidation, memory decay/merge, core promotion, 5-signal ranking
 """
 
 import logging
@@ -18,6 +19,9 @@ from .config import (
     SEMANTIC_DEDUP_ENABLED,
     SEMANTIC_DEDUP_THRESHOLD,
     SEMANTIC_DEDUP_CHECK_LIMIT,
+    # Phase 4 config
+    CONSOLIDATION_ENABLED,
+    CONSOLIDATION_INTERVAL_TURNS,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +29,23 @@ logger = logging.getLogger(__name__)
 # Lazy import for optional Phase 2 components
 _vector_store_class = None
 _embedding_service_class = None
+
+# Lazy import for Phase 4 consolidation
+_consolidation_worker_class = None
+
+
+def _load_consolidation_worker():
+    """Lazy load Phase 4 consolidation worker"""
+    global _consolidation_worker_class
+    if _consolidation_worker_class is None:
+        try:
+            from .consolidation_worker import ConsolidationWorker
+            _consolidation_worker_class = ConsolidationWorker
+            return True
+        except ImportError as e:
+            logger.warning(f"Phase 4 consolidation worker not available: {e}")
+            return False
+    return True
 
 
 def _load_phase2_components():
@@ -105,8 +126,26 @@ class MemorySystem:
         self.extractor = MemoryExtractor()
         self.retriever = MemoryRetriever(
             self.redis_store, 
-            vector_store=self.vector_store if self._semantic_enabled else None
+            vector_store=self.vector_store if self._semantic_enabled else None,
+            use_5_signal=True,  # Phase 4: Use 5-signal ranking
         )
+        
+        # Initialize Phase 4 consolidation worker
+        self.consolidation_worker = None
+        self._consolidation_enabled = False
+        
+        if CONSOLIDATION_ENABLED and _load_consolidation_worker():
+            try:
+                self.consolidation_worker = _consolidation_worker_class(
+                    redis_store=self.redis_store,
+                    flat_file_store=self.flat_file_store,
+                    vector_store=self.vector_store,
+                    embedding_service=self.embedding_service,
+                )
+                self._consolidation_enabled = True
+                logger.info("Phase 4 consolidation worker enabled")
+            except Exception as e:
+                logger.warning(f"Failed to initialize consolidation worker: {e}")
         
         logger.info(f"Initialized memory system for user {user_id} (semantic={self._semantic_enabled})")
 
@@ -209,14 +248,25 @@ class MemorySystem:
         
         # STEP 4 & 5: RETRIEVE + INJECT - Get relevant memories and format for prompt
         retrieval_start = time.time()
-        memory_context = self._compose_prompt_context(
+        memory_context, active_memories = self._compose_prompt_context(
             user_message, 
             priority_types
         )
         stats['retrieval_time_ms'] = (time.time() - retrieval_start) * 1000
         
-        # Count retrieved memories (rough estimate from formatted text)
-        stats['retrieved_count'] = memory_context.count('\n- ') if memory_context else 0
+        # Count retrieved memories and expose active memories
+        stats['retrieved_count'] = len(active_memories)
+        stats['active_memories'] = active_memories
+        
+        # Phase 4: Check if consolidation should run
+        if self._consolidation_enabled and self.consolidation_worker:
+            if self.consolidation_worker.needs_consolidation(
+                self.turn_number, 
+                CONSOLIDATION_INTERVAL_TURNS
+            ):
+                logger.info("Running background consolidation...")
+                consolidation_stats = self.consolidation_worker.run_consolidation(self.turn_number)
+                stats['consolidation'] = consolidation_stats
         
         logger.info(
             f"Turn {self.turn_number} complete: "
@@ -264,7 +314,7 @@ class MemorySystem:
         self, 
         user_message: str, 
         priority_types: Optional[List[str]] = None,
-    ) -> str:
+    ) -> Tuple[str, List[Dict]]:
         """
         Compose the full memory context for prompt injection.
         
@@ -277,9 +327,12 @@ class MemorySystem:
             priority_types: Memory types to prioritize
         
         Returns:
-            Complete formatted memory context
+            (formatted_context, active_memories) where:
+            - formatted_context: Complete formatted memory context string
+            - active_memories: List of memory dicts with metadata
         """
         sections = []
+        active_memories = []
         
         # Layer 1: Core Memory (always injected)
         core_memory = self.flat_file_store.read_core_memory()
@@ -288,17 +341,37 @@ class MemorySystem:
             sections.append(core_memory)
         
         # Layer 4: Long-Term Memory (selective retrieval)
-        retrieved_memories = self.retriever.retrieve_for_prompt(
+        retrieved_memories_list = self.retriever.retrieve(
             user_message,
             self.turn_number,
             priority_types,
         )
         
-        if retrieved_memories.strip():
-            sections.append("### LONG-TERM MEMORY (Retrieved)")
-            sections.append(retrieved_memories)
+        # Update access tracking for retrieved memories
+        for mem in retrieved_memories_list:
+            self.redis_store.increment_access_count(mem['memory_id'], self.turn_number)
         
-        return "\n\n".join(sections)
+        # Format the active memories for exposure
+        for mem in retrieved_memories_list:
+            active_memories.append({
+                "memory_id": mem.get('memory_id', 'unknown'),
+                "content": f"{mem.get('key', 'unknown')}: {mem.get('value', '')}",
+                "type": mem.get('type', 'fact'),
+                "origin_turn": mem.get('turn_number', 0),
+                "last_used_turn": self.turn_number,
+                "confidence": mem.get('confidence', 0),
+                "mention_count": mem.get('mention_count', 1),
+                "access_count": mem.get('access_count', 0) + 1  # Will be updated after
+            })
+        
+        # Format memories for prompt
+        retrieved_formatted = self.retriever.format_memories_for_prompt(retrieved_memories_list)
+        
+        if retrieved_formatted.strip():
+            sections.append("### LONG-TERM MEMORY (Retrieved)")
+            sections.append(retrieved_formatted)
+        
+        return "\n\n".join(sections), active_memories
 
     def get_prompt_context(
         self, 
@@ -400,3 +473,39 @@ class MemorySystem:
             health['vector_store'] = None  # Not enabled
         
         return health
+
+    # =========================================================================
+    # Phase 4: Consolidation Methods
+    # =========================================================================
+    
+    def run_consolidation(self, force: bool = False) -> Optional[Dict]:
+        """
+        Manually trigger consolidation.
+        
+        Args:
+            force: Force run even if not enough memories
+        
+        Returns:
+            Consolidation statistics or None if not available
+        """
+        if not self._consolidation_enabled or not self.consolidation_worker:
+            logger.warning("Consolidation worker not available")
+            return None
+        
+        return self.consolidation_worker.run_consolidation(self.turn_number, force=force)
+
+    def get_consolidation_stats(self) -> Optional[Dict]:
+        """
+        Get consolidation statistics.
+        
+        Returns:
+            Consolidation stats or None if not available
+        """
+        if not self._consolidation_enabled or not self.consolidation_worker:
+            return None
+        
+        return self.consolidation_worker.get_stats()
+
+    def is_consolidation_enabled(self) -> bool:
+        """Check if consolidation is enabled"""
+        return self._consolidation_enabled

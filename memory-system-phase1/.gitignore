@@ -53,6 +53,9 @@ test_output.txt
 *.tmp
 *.bak
 
+# Test files (except the main customer conversation test)
+test_*.py
+
 # OS
 .DS_Store
 Thumbs.db

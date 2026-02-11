@@ -1,10 +1,10 @@
-# Long-Form Memory System - Phase 1, 2 & 3
+# Long-Form Memory System - Phase 1, 2, 3 & 4
 
 A production-grade memory system for AI agents that enables accurate recall across 1,000+ conversation turns.
 
 ## What This Is
 
-This is **Phase 1, 2 & 3** of a 6-phase implementation plan for a complete long-form memory system.
+This is **Phase 1, 2, 3 & 4** of a 6-phase implementation plan for a complete long-form memory system.
 
 ### Phase 1 Features:
 - ✅ Flat file storage for Core Memory (always-injected user identity)
@@ -20,13 +20,23 @@ This is **Phase 1, 2 & 3** of a 6-phase implementation plan for a complete long-
 - ✅ Semantic similarity search
 - ✅ Multi-signal ranking (semantic + type + recency)
 
-### Phase 3 Features (NEW):
+### Phase 3 Features:
 - ✅ Stage 3 LLM-based extraction for complex cases
 - ✅ Multi-provider support (OpenAI, Anthropic, Groq)
 - ✅ Semantic deduplication using vector similarity
 - ✅ Memory updates and superseding
 - ✅ Confidence scoring with certainty modifiers
 - ✅ Confidence boosting for repeated mentions
+
+### Phase 4 Features:
+- ✅ Background consolidation worker
+- ✅ Memory decay for old/unused memories
+- ✅ Memory merging for similar content
+- ✅ Promotion to Core Memory
+- ✅ 5-signal ranking (semantic + type + recency + frequency + confidence)
+- ✅ Access tracking for frequency scoring
+
+> **Status:** All 4 phases verified working as of February 2026
 
 ## Quick Start
 
@@ -54,61 +64,91 @@ docker-compose ps
 ### 3. Run the Demo
 
 ```bash
-# Phase 1 demo (basic retrieval)
-python demo.py
-
-# Phase 2 demo (semantic search)
-python demo_phase2.py
-
-# Phase 3 demo (LLM extraction, deduplication, updates)
-# First, set your LLM API key:
-# For Groq (fastest): set GROQ_API_KEY=your_key_here
+# Set your LLM API key(s) first:
+# For Groq (fastest, recommended): 
+#   Single key: set GROQ_API_KEY=your_key_here
+#   Multiple keys for rate limit rotation: 
+#     set GROQ_API_KEY_1=your_first_key
+#     set GROQ_API_KEY_2=your_second_key
 # For OpenAI: set OPENAI_API_KEY=your_key_here
 # For Anthropic: set ANTHROPIC_API_KEY=your_key_here
 
-python demo_phase3.py
+# Phase 4 demo (consolidation & 5-signal ranking)
+python demo_phase4.py
+
+# Comprehensive test (all phases, 120+ turns, 3 consolidation cycles)
+python test_all_phases.py
+
+# Full conversation test (60-turn customer service scenario with active memory tracking)
+python test_customer_conversation.py
+
+# Active memory tracking demo (10-turn demonstration)
+python demo_active_memories.py
+
+# Simple active memory example (5 turns)
+python example_active_memories.py
 ```
 
-The Phase 2 demo will:
-1. Simulate a conversation with rich information
-2. Extract and store memories with embeddings
-3. Test semantic similarity search
-4. Demonstrate multi-signal ranking
+The demos demonstrate:
 
-The Phase 3 demo will:
-1. Test LLM-based extraction for complex messages
-2. Demonstrate semantic deduplication (similarity > 0.92)
-3. Show memory updates and superseding
-4. Test confidence boosting for repeated information
-5. Verify superseded memories are filtered from retrieval
+**demo_phase4.py**:
+1. Full 4-phase system with LLM extraction
+2. Semantic search and 5-signal ranking
+3. Background consolidation triggering
+4. Memory decay, merging, and promotion
+
+**test_all_phases.py** (comprehensive):
+1. Process 120+ conversation turns with 60+ extractable memories
+2. Trigger automatic consolidation 3 times (at turns 50, 100, 150)
+3. Demonstrate all 4 phases working together
+4. Show memory decay, merging, and promotion to core memory
+5. Test 5-signal ranking with various query types
+6. Multi-API key rotation (avoids rate limits)
+
+**test_customer_conversation.py**:
+1. Realistic 60-turn customer service conversation
+2. Extract customer information, preferences, and transaction details
+3. Demonstrate active memory tracking at each turn
+4. Show which memories influenced each response with full metadata
+
+**demo_active_memories.py**:
+1. 10-turn conversation showing memory tracking
+2. Exposes which memories influenced each response
+3. Shows memory evolution: origin_turn, last_used_turn, access_count
+4. Demonstrates memory persistence across turns
 
 ## Project Structure
 
 ```
-memory-system/
+memory-system-phase1/
 ├── docker-compose.yml          # Redis + Qdrant setup
 ├── redis.conf                  # Redis configuration (AOF persistence)
 ├── requirements.txt            # Python dependencies
-├── demo.py                     # Phase 1 demo script
-├── demo_phase2.py              # Phase 2 demo script
-├── demo_phase3.py              # Phase 3 demo script (NEW)
+├── .env.example                # Environment variable template
+├── .gitignore                  # Git ignore patterns
+├── demo_phase4.py              # Phase 4 demo (consolidation)
+├── test_all_phases.py          # Comprehensive test (120+ turns)
+├── test_customer_conversation.py  # Customer service test (60 turns)
+├── demo_active_memories.py     # Active memory tracking demo
+├── example_active_memories.py  # Simple active memory example
 ├── memory/                     # Flat file storage
-│   └── user_1/                # Per-user directory
-│       ├── CORE.md            # Core identity (always injected)
-│       ├── PREFERENCES.md     # User preferences
-│       ├── INSTRUCTIONS.md    # Behavioral instructions
-│       └── CONSTRAINTS.md     # Hard constraints
-└── src/                       # Source code
+│   └── user_1/                 # Per-user directory
+│       ├── CORE.md             # Core identity (always injected)
+│       ├── PREFERENCES.md      # User preferences
+│       ├── INSTRUCTIONS.md     # Behavioral instructions
+│       └── CONSTRAINTS.md      # Hard constraints
+└── src/                        # Source code
     ├── __init__.py
-    ├── config.py              # Configuration & tunable parameters
-    ├── flat_file_store.py     # Flat file storage layer
-    ├── redis_store.py         # Redis storage layer (Phase 3: + superseding)
-    ├── extractor.py           # Memory extraction (Stage 1, 2 & 3)
-    ├── llm_extractor.py       # Phase 3: LLM-based extraction (NEW)
-    ├── retriever.py           # Memory retrieval (with semantic search)
-    ├── memory_system.py       # Main orchestrator
-    ├── embedding_service.py   # Phase 2: Embedding generation
-    └── vector_store.py        # Phase 2: Qdrant vector store
+    ├── config.py               # Configuration & tunable parameters
+    ├── flat_file_store.py      # Flat file storage layer
+    ├── redis_store.py          # Redis storage layer (with superseding)
+    ├── extractor.py            # Memory extraction (Stage 1, 2 & 3)
+    ├── llm_extractor.py        # Phase 3: LLM-based extraction (multi-key support)
+    ├── retriever.py            # Memory retrieval (5-signal ranking)
+    ├── memory_system.py        # Main orchestrator (with active memory tracking)
+    ├── embedding_service.py    # Phase 2: Embedding generation
+    ├── vector_store.py         # Phase 2: Qdrant vector store
+    └── consolidation_worker.py # Phase 4: Background consolidation
 ```
 
 ## Usage
@@ -125,6 +165,15 @@ memory = MemorySystem(user_id="alice")
 for user_message in conversation:
     memory_context, stats = memory.process_turn(user_message)
     
+    # Access active memories that influenced this response
+    active_memories = stats.get('active_memories', [])
+    for mem in active_memories:
+        print(f"Memory {mem['memory_id']} influenced response:")
+        print(f"  Content: {mem['content']}")
+        print(f"  Origin: Turn {mem['origin_turn']}")
+        print(f"  Last Used: Turn {mem['last_used_turn']}")
+        print(f"  Confidence: {mem['confidence']:.2f}")
+    
     # Inject memory_context into your LLM prompt
     prompt = f"""
     {memory_context}
@@ -136,6 +185,38 @@ for user_message in conversation:
     # Generate response with your LLM
     response = your_llm(prompt)
 ```
+
+### Active Memory Tracking
+
+The system exposes which memories influenced each response:
+
+```python
+# Process a turn
+_, stats = memory.process_turn("What are my scheduling preferences?")
+
+# Get active memories
+active_memories = stats['active_memories']
+
+# Example output:
+# [
+#   {
+#     "memory_id": "mem_0142",
+#     "content": "call_preference: after 11 AM",
+#     "type": "preference",
+#     "origin_turn": 1,
+#     "last_used_turn": 412,
+#     "confidence": 0.95,
+#     "mention_count": 1,
+#     "access_count": 15
+#   }
+# ]
+```
+
+This allows you to:
+- Track which memories influenced each response
+- Debug retrieval behavior  
+- Audit memory usage over time
+- Validate memory relevance
 
 ### Retrieval Only
 
@@ -196,12 +277,12 @@ print(f"Memories by type: {stats['memories_by_type']}")
 - Assigns confidence scores
 - Types: preference, constraint, entity, instruction, commitment, fact
 
-**Stage 3: LLM Extraction** _(Phase 3 - NEW)_
+**Stage 3: LLM Extraction** _(Phase 3)_
 - Uses OpenAI, Anthropic, or Groq for complex extraction
 - Escalates when Stage 2 confidence < 0.7 or no results
 - Structured JSON extraction with confidence scores
 - Detects memory updates and contradictions
-- Target latency: ~50-200ms (Groq), ~200-500ms (standard APIs)
+- Target latency: ~1-3s (Groq), ~200-500ms (standard APIs)
 
 ### Retrieval Strategy
 
@@ -240,7 +321,7 @@ final_score = w_semantic × semantic_score + w_type × type_priority + w_recency
 - Prevents storing identical memories
 - Updates recency of existing memories instead
 
-**Phase 3: Semantic Deduplication** _(NEW)_
+**Phase 3: Semantic Deduplication**
 - Uses vector similarity (cosine score > 0.92 = duplicate)
 - Catches near-duplicates with different wording:
   - "I prefer calls after 11 AM"
@@ -282,13 +363,34 @@ All tunable parameters are in `src/config.py`:
 |-----------|---------|-------------|
 | `STAGE_3_ENABLED` | False | Enable/disable LLM-based extraction |
 | `LLM_PROVIDER` | groq | LLM provider: "openai", "anthropic", "groq" |
-| `LLM_EXTRACTION_MODEL` | llama3-8b-8192 | Model for Stage 3 extraction |
+| `LLM_EXTRACTION_MODEL` | llama-3.3-70b-versatile | Model for Stage 3 extraction |
 | `STAGE_3_CONFIDENCE_THRESHOLD` | 0.7 | Escalate to LLM if Stage 2 < this |
 | `SEMANTIC_DEDUP_ENABLED` | True | Enable semantic deduplication |
 | `SEMANTIC_DEDUP_THRESHOLD` | 0.92 | Similarity score to consider duplicate |
 | `MIN_CONFIDENCE_TO_STORE` | 0.6 | Discard memories below this confidence |
 | `CONFIDENCE_BOOST_PER_MENTION` | 0.1 | Boost confidence when repeated |
 | `MAX_CONFIDENCE` | 0.95 | Maximum confidence after boosts |
+
+### Phase 4 Parameters (NEW)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `CONSOLIDATION_ENABLED` | True | Enable/disable background consolidation |
+| `CONSOLIDATION_INTERVAL_TURNS` | 50 | Turns between consolidation runs |
+| `MEMORY_DECAY_ENABLED` | True | Enable memory decay for old memories |
+| `MEMORY_MERGE_ENABLED` | True | Enable merging of similar memories |
+| `PROMOTION_ENABLED` | True | Enable promotion to Core Memory |
+| `DECAY_TURNS_THRESHOLD` | 100 | Turns before decay starts |
+| `DECAY_FACTOR` | 0.95 | Confidence multiplier per decay cycle |
+| `MERGE_SIMILARITY_THRESHOLD` | 0.88 | Similarity to consider for merging |
+| `PROMOTION_CONFIDENCE_THRESHOLD` | 0.85 | Min confidence for promotion |
+| `PROMOTION_MENTION_THRESHOLD` | 3 | Min mentions for promotion |
+| `PROMOTION_ACCESS_THRESHOLD` | 5 | Min accesses for promotion |
+| `RANKING_WEIGHTS_5_SIGNAL.semantic` | 0.35 | Weight for semantic similarity |
+| `RANKING_WEIGHTS_5_SIGNAL.type` | 0.20 | Weight for type priority |
+| `RANKING_WEIGHTS_5_SIGNAL.recency` | 0.20 | Weight for recency score |
+| `RANKING_WEIGHTS_5_SIGNAL.frequency` | 0.15 | Weight for access frequency |
+| `RANKING_WEIGHTS_5_SIGNAL.confidence` | 0.10 | Weight for confidence score |
 
 ## What's Implemented
 
@@ -310,7 +412,7 @@ All tunable parameters are in `src/config.py`:
 - ✅ Configurable ranking weights
 - ✅ Graceful fallback to Phase 1 if Qdrant unavailable
 
-### Phase 3 (NEW)
+### Phase 3
 - ✅ Stage 3 LLM-based extraction (OpenAI, Anthropic, Groq)
 - ✅ Escalation logic (low confidence → LLM)
 - ✅ Semantic deduplication using vector similarity
@@ -319,38 +421,71 @@ All tunable parameters are in `src/config.py`:
 - ✅ Confidence boosting for repeated mentions
 - ✅ Superseded memory filtering in retrieval
 
-## What's Coming Next
+### Phase 4
+- ✅ Background consolidation worker
+- ✅ Memory decay for old/unused memories
+- ✅ Memory merging for semantically similar content
+- ✅ Promotion to Core Memory files
+- ✅ 5-signal ranking (semantic + type + recency + frequency + confidence)
+- ✅ Access tracking and frequency scoring
+- ✅ Configurable consolidation intervals
 
-### Phase 4 (Weeks 7-8)
-- Background consolidation worker
-- Memory merging and decay
-- Promotion to Core Memory
-- 5-signal ranking (add frequency + confidence signals)
+## What's Coming Next
 
 ### Phase 5 (Weeks 9-10)
 - Evaluation framework
 - Synthetic test generator
 - Regression test suites
 
-### Phase 6 (Weeks 11-12)
-- Parameter tuning
-- Production monitoring
-- Performance optimization
+### Comprehensive Test
 
-## Testing
-
-The `demo.py` script serves as both a demo and a basic test:
+The `test_all_phases.py` runs a full system test:
 
 ```bash
-python demo.py
+python test_all_phases.py
 ```
 
 It validates:
-- Extraction accuracy (should extract ~15-20 memories from 20 turns)
-- Filtering effectiveness (should filter ~5 empty turns)
-- Storage persistence
-- Retrieval relevance
-- Deduplication
+- All 4 phases working together (120+ turns)
+- Automatic consolidation triggering (3 cycles at turns 50, 100, 150)
+- 60+ memory extractions from realistic dialogue
+- 5-signal ranking effectiveness
+- Memory decay, merging, and promotion to core memory
+- Multi-API key rotation (prevents rate limit issues)
+- Performance metrics across extended conversations
+
+### Customer Service Test
+
+The `test_customer_conversation.py` runs a realistic scenario:
+
+```bash
+python test_customer_conversation.py
+```
+
+It validates:
+- 60-turn customer service conversation
+- Extraction of entities, facts, preferences, and constraints
+- Active memory tracking (which memories influenced each response)
+- Memory persistence and access count tracking
+- JSON output format for integration
+
+### Active Memory Demos
+
+These demonstrate the active memory tracking feature:
+
+```bash
+# 10-turn comprehensive demo
+python demo_active_memories.py
+
+# 5-turn simple example
+python example_active_memories.py
+```
+
+They show:
+- Which memories influenced each response
+- Memory metadata: origin_turn, last_used_turn, access_count, confidence
+- Memory evolution across conversation turns
+- JSON output format for debugging and auditing
 
 ## Troubleshooting
 
@@ -410,10 +545,31 @@ This implementation follows the spec in `LONG_FORM_MEMORY_SYSTEM_Version2.md`:
 
 ## Performance
 
-Phase 1 targets:
-- Extraction: ~200ms per turn (async, invisible to user)
-- Retrieval: <50ms per turn (blocks response generation)
-- Storage: Redis + flat files, <10ms per operation
+### Verified Performance Metrics (All 3 Phases)
+
+| Operation | Target | Actual (Measured) |
+|-----------|--------|-------------------|
+| **Retrieval** | <50ms | 24-52ms ✅ |
+| **Storage** | <10ms | 130-233ms (with vector indexing) |
+| **LLM Extraction (Groq)** | 50-200ms | 1.1-3.2s |
+| **Embedding Model Load** | - | ~16s (one-time cold start) |
+| **Semantic Search** | - | 24-35ms ✅ |
+
+### Phase-Specific Performance
+
+**Phase 1 (Basic):**
+- Extraction: ~1-2ms per turn (heuristic + pattern matching)
+- Storage: <10ms per operation
+
+**Phase 2 (Semantic Search):**
+- First query: ~16-26s (embedding model cold start)
+- Subsequent queries: 24-52ms
+- Vector indexing adds ~20-50ms to storage
+
+**Phase 3 (LLM Extraction):**
+- Groq API latency: 1.1-3.2s per extraction
+- Includes retry logic for JSON parsing errors
+- Semantic deduplication: <50ms
 
 ## License
 
@@ -421,10 +577,11 @@ This is a reference implementation based on the memory system specification.
 
 ## Contributing
 
-This is Phase 1. Contributions welcome for:
+All 4 phases are now implemented and verified working. Contributions welcome for:
 - Bug fixes
 - Performance improvements
 - Documentation
 - Test cases
+- Phase 5-6 implementation
 
-Future phases will be implemented incrementally on this foundation.
+See "What's Coming Next" section for planned features.

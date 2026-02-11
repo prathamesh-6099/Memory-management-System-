@@ -111,6 +111,11 @@ MEMORY_FIELDS = [
     "supersedes",        # Phase 3: ID of memory this one supersedes
     "is_update",         # Phase 3: Flag if this is an update to existing memory
     "last_accessed_turn",  # Phase 3: For frequency tracking
+    # Phase 4 fields
+    "access_count",      # Phase 4: Total number of times retrieved
+    "merged_from",       # Phase 4: IDs of memories merged into this one
+    "promoted_to_core",  # Phase 4: Flag if promoted to core memory
+    "decay_applied",     # Phase 4: Total decay applied to confidence
 ]
 
 # Phase 3: Stage 3 LLM Extraction Configuration
@@ -119,7 +124,17 @@ LLM_PROVIDER = "groq"  # "openai" | "anthropic" | "groq"
 LLM_EXTRACTION_MODEL = os.getenv("LLM_EXTRACTION_MODEL", "llama-3.3-70b-versatile")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# Support multiple Groq API keys for rate limit rotation
+GROQ_API_KEYS = [
+    key for key in [
+        os.getenv("GROQ_API_KEY"),
+        os.getenv("GROQ_API_KEY_1"),
+        os.getenv("GROQ_API_KEY_2"),
+    ] if key is not None
+]
+GROQ_API_KEY = GROQ_API_KEYS[0] if GROQ_API_KEYS else None  # Backward compatibility
+
 STAGE_3_CONFIDENCE_THRESHOLD = 0.7  # Escalate to LLM if Stage 2 < this
 STAGE_3_MAX_TOKENS = 200  # Max tokens for LLM extraction response
 STAGE_3_TEMPERATURE = 0.1  # Low temperature for consistent extraction
@@ -166,6 +181,51 @@ CONFIDENCE_MODIFIERS = {
     "occasionally": -0.15,
     "could": -0.15,
 }
+
+# ============================================================================
+# Phase 4: Consolidation & 5-Signal Ranking Configuration
+# ============================================================================
+
+# Background Consolidation Worker
+CONSOLIDATION_ENABLED = True
+CONSOLIDATION_INTERVAL_TURNS = 50  # Run consolidation every N turns
+CONSOLIDATION_MIN_MEMORIES = 10    # Minimum memories before consolidation runs
+
+# Memory Decay Configuration
+MEMORY_DECAY_ENABLED = True
+DECAY_TURNS_THRESHOLD = 100        # Apply decay after memory is this old
+DECAY_INACTIVE_TURNS = 50          # Extra decay if not accessed in N turns
+DECAY_RATE_PER_100_TURNS = 0.1     # Confidence reduction per 100 turns
+MIN_DECAY_CONFIDENCE = 0.3         # Memories below this may be deleted
+DELETE_VERY_LOW_CONFIDENCE = True  # Auto-delete memories below min threshold
+
+# Memory Merging Configuration
+MEMORY_MERGE_ENABLED = True
+MERGE_SIMILARITY_THRESHOLD = 0.85  # Similarity above this triggers merge check
+MERGE_SAME_TYPE_ONLY = True        # Only merge memories of same type
+MAX_MERGED_VALUE_LENGTH = 500      # Max chars for merged value
+
+# Core Memory Promotion Configuration
+PROMOTION_ENABLED = True
+PROMOTION_CONFIDENCE_THRESHOLD = 0.90  # Min confidence for promotion
+PROMOTION_MENTION_THRESHOLD = 3        # Min mentions for promotion
+PROMOTION_ACCESS_THRESHOLD = 5         # Min access count for promotion
+PROMOTION_AGE_THRESHOLD = 50           # Min turns old for promotion
+PROMOTABLE_TYPES = ["entity", "preference", "constraint", "instruction"]
+
+# 5-Signal Ranking Weights (must sum to 1.0)
+RANKING_WEIGHTS_5_SIGNAL = {
+    "semantic": 0.35,     # Semantic similarity score weight
+    "type": 0.20,         # Memory type priority weight
+    "recency": 0.20,      # Recency score weight
+    "frequency": 0.15,    # Access frequency weight (NEW)
+    "confidence": 0.10,   # Confidence score weight (NEW)
+}
+
+# Frequency scoring configuration
+FREQUENCY_DECAY_RATE = 0.05         # How fast frequency score decays
+FREQUENCY_MAX_ACCESSES = 20         # Normalize access count against this
+ACCESS_RECENCY_WEIGHT = 0.6         # Weight for recent accesses vs total count
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

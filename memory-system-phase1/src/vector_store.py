@@ -365,6 +365,42 @@ class VectorStore:
         
         return similar
     
+    def delete_memory(self, memory_id: str) -> bool:
+        """
+        Delete a specific memory from the vector store.
+        
+        Args:
+            memory_id: ID of memory to delete
+        
+        Returns:
+            True if deleted successfully
+        """
+        try:
+            point_id = self._hash_id(memory_id)
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.PointIdsList(
+                    points=[point_id],
+                ),
+            )
+            logger.debug(f"Deleted memory {memory_id} from vector store")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to delete memory {memory_id} from vector store: {e}")
+            return False
+    
+    def add_memory(self, memory: Dict) -> bool:
+        """
+        Alias for store_memory for consistency.
+        
+        Args:
+            memory: Memory dictionary to store
+        
+        Returns:
+            True if stored successfully
+        """
+        return self.store_memory(memory)
+    
     def clear(self) -> bool:
         """
         Clear all vectors from the collection (use with caution).

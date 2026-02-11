@@ -77,6 +77,12 @@ class RedisStore:
         memory.setdefault('is_update', False)
         memory.setdefault('last_accessed_turn', memory.get('turn_number', 0))
         
+        # Phase 4 fields
+        memory.setdefault('access_count', 0)
+        memory.setdefault('merged_from', '')
+        memory.setdefault('promoted_to_core', False)
+        memory.setdefault('decay_applied', 0.0)
+        
         # Convert None values to empty strings for Redis compatibility
         memory_to_store = {}
         for key, value in memory.items():
@@ -136,6 +142,14 @@ class RedisStore:
         if 'is_update' in memory:
             # Convert string back to boolean
             memory['is_update'] = memory['is_update'] in ['True', 'true', '1', True]
+        
+        # Phase 4 field conversions
+        if 'access_count' in memory:
+            memory['access_count'] = int(memory['access_count'])
+        if 'decay_applied' in memory:
+            memory['decay_applied'] = float(memory['decay_applied'])
+        if 'promoted_to_core' in memory:
+            memory['promoted_to_core'] = memory['promoted_to_core'] in ['True', 'true', '1', True]
         
         # Convert empty strings back to None for Phase 3 fields
         if 'superseded_by' in memory and memory['superseded_by'] == '':
@@ -340,6 +354,52 @@ class RedisStore:
         # Delete each memory properly
         for memory_id in memory_ids:
             self.delete_memory(memory_id)
+
+    def increment_access_count(self, memory_id: str, current_turn: int) -> bool:
+        """
+        Increment access count for a memory (Phase 4).
+        Called when a memory is retrieved for prompt injection.
+        
+        Args:
+            memory_id: Memory to track
+            current_turn: Current conversation turn
+        
+        Returns:
+            True if successful
+        """
+        memory = self.get_memory(memory_id)
+        if not memory:
+            return False
+        
+        redis_key = f"{REDIS_MEMORY_PREFIX}{memory_id}"
+        
+        # Increment access count
+        current_count = int(memory.get('access_count', 0))
+        self.client.hset(redis_key, "access_count", current_count + 1)
+        
+        # Update last accessed turn
+        self.client.hset(redis_key, "last_accessed_turn", current_turn)
+        
+        logger.debug(f"Memory {memory_id} accessed (count={current_count + 1})")
+        return True
+
+    def get_all_memories(self, limit: int = 10000) -> List[Dict]:
+        """
+        Get all memories (for consolidation).
+        
+        Args:
+            limit: Maximum number to retrieve
+        
+        Returns:
+            List of all memory dictionaries
+        """
+        memory_ids = self.client.zrange(REDIS_RECENCY_INDEX, 0, limit - 1)
+        memories = []
+        for memory_id in memory_ids:
+            memory = self.get_memory(memory_id)
+            if memory:
+                memories.append(memory)
+        return memories
 
     def health_check(self) -> bool:
         """Check if Redis is responsive"""
