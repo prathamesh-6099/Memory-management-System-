@@ -1,0 +1,84 @@
+{
+  "generated_at": "2026-02-11T21:41:27.474377",
+  "summary": {
+    "total_tests": 1,
+    "passed": 1,
+    "failed": 0
+  },
+  "results": [
+    {
+      "test_name": "evaluation_demo",
+      "passed": true,
+      "failures": [],
+      "extraction": {
+        "precision": 0.6667,
+        "recall": 0.5,
+        "f1": 0.5714,
+        "true_positives": 2,
+        "false_positives": 1,
+        "false_negatives": 2,
+        "value_accuracy": 1.0,
+        "average_confidence": 0.925,
+        "by_type": {
+          "entity": {
+            "tp": 1,
+            "fp": 1,
+            "fn": 0,
+            "f1": 0.6667
+          },
+          "preference": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "f1": 0.0
+          },
+          "constraint": {
+            "tp": 0,
+            "fp": 0,
+            "fn": 1,
+            "f1": 0.0
+          },
+          "instruction": {
+            "tp": 1,
+            "fp": 0,
+            "fn": 0,
+            "f1": 1.0
+          }
+        }
+      },
+      "retrieval": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "mrr": 0.0,
+        "queries_evaluated": 0,
+        "relevant_retrieved": 0,
+        "irrelevant_retrieved": 0,
+        "relevant_missed": 0,
+        "avg_relevant_position": 0.0,
+        "precision_at_k": {},
+        "recall_at_k": {}
+      },
+      "performance": {
+        "turns_processed": 5,
+        "latency": {
+          "extraction_avg_ms": 0.0,
+          "storage_avg_ms": 0.0,
+          "retrieval_avg_ms": 0.0,
+          "total_avg_ms": 4249.45,
+          "p50_ms": 41.53,
+          "p90_ms": 12665.35,
+          "p99_ms": 20201.83
+        },
+        "throughput": {
+          "turns_per_second": 0.24,
+          "total_time_seconds": 21.25
+        },
+        "memory": {
+          "peak_mb": 0.0,
+          "avg_mb": 0.0
+        }
+      }
+    }
+  ]
+}

@@ -1,10 +1,10 @@
-# Long-Form Memory System - Phase 1, 2, 3 & 4
+# Long-Form Memory System - Phase 1, 2, 3, 4 & 5
 
 A production-grade memory system for AI agents that enables accurate recall across 1,000+ conversation turns.
 
 ## What This Is
 
-This is **Phase 1, 2, 3 & 4** of a 6-phase implementation plan for a complete long-form memory system.
+This is **Phase 1 through 5** of a 6-phase implementation plan for a complete long-form memory system.
 
 ### Phase 1 Features:
 - ✅ Flat file storage for Core Memory (always-injected user identity)
@@ -36,7 +36,14 @@ This is **Phase 1, 2, 3 & 4** of a 6-phase implementation plan for a complete lo
 - ✅ 5-signal ranking (semantic + type + recency + frequency + confidence)
 - ✅ Access tracking for frequency scoring
 
-> **Status:** All 4 phases verified working as of February 2026
+### Phase 5 Features:
+- ✅ Evaluation framework (precision, recall, F1 metrics)
+- ✅ Synthetic test conversation generator
+- ✅ Ground truth builder for test cases
+- ✅ Regression test suites (extraction, retrieval, integration, performance)
+- ✅ Report generation (JSON, Markdown, console)
+
+> **Status:** All 5 phases verified working as of February 2026
 
 ## Quick Start
 
@@ -83,6 +90,12 @@ python test_customer_conversation.py
 
 # Phase 4 demo (consolidation & 5-signal ranking)
 python demo_phase4.py
+
+# Phase 5 demo (evaluation framework)
+python demo_phase5.py
+
+# Run regression tests
+pytest tests/regression/ -v
 ```
 
 The Phase 2 demo will:
@@ -109,6 +122,7 @@ memory-system/
 ├── demo_phase2.py              # Phase 2 demo script
 ├── demo_phase3.py              # Phase 3 demo script
 ├── demo_phase4.py              # Phase 4 demo script
+├── demo_phase5.py              # Phase 5 demo script
 ├── test_customer_conversation.py  # Full conversation test
 ├── memory/                     # Flat file storage
 │   └── user_1/                # Per-user directory
@@ -127,7 +141,21 @@ memory-system/
     ├── memory_system.py       # Main orchestrator
     ├── embedding_service.py   # Phase 2: Embedding generation
     ├── vector_store.py        # Phase 2: Qdrant vector store
-    └── consolidation_worker.py # Phase 4: Background consolidation
+    ├── consolidation_worker.py # Phase 4: Background consolidation
+    └── evaluation/            # Phase 5: Evaluation framework
+        ├── metrics.py         # Evaluation metrics
+        ├── evaluator.py       # Memory system evaluator
+        └── report.py          # Report generation
+└── tests/                     # Phase 5: Test suites
+    ├── conftest.py            # Pytest fixtures
+    ├── generators/            # Test generators
+    │   ├── synthetic_generator.py
+    │   └── ground_truth.py
+    └── regression/            # Regression tests
+        ├── test_extraction.py
+        ├── test_retrieval.py
+        ├── test_integration.py
+        └── test_performance.py
 ```
 
 ## Usage
@@ -368,12 +396,15 @@ All tunable parameters are in `src/config.py`:
 - ✅ Access tracking and frequency scoring
 - ✅ Configurable consolidation intervals
 
-## What's Coming Next
+### Phase 5
+- ✅ Evaluation framework with metrics (precision, recall, F1)
+- ✅ Synthetic test conversation generator
+- ✅ Ground truth builder for custom test cases
+- ✅ Regression test suites (4 categories)
+- ✅ Report generation (JSON, Markdown, console)
+- ✅ pytest integration with fixtures and markers
 
-### Phase 5 (Weeks 9-10)
-- Evaluation framework
-- Synthetic test generator
-- Regression test suites
+## What's Coming Next
 
 ### Phase 6 (Weeks 11-12)
 - Parameter tuning
@@ -485,11 +516,11 @@ This is a reference implementation based on the memory system specification.
 
 ## Contributing
 
-All 4 phases are now implemented and verified working. Contributions welcome for:
+All 5 phases are now implemented and verified working. Contributions welcome for:
 - Bug fixes
 - Performance improvements
 - Documentation
 - Test cases
-- Phase 5-6 implementation
+- Phase 6 implementation
 
 See "What's Coming Next" section for planned features.
