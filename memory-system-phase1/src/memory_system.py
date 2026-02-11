@@ -248,14 +248,15 @@ class MemorySystem:
         
         # STEP 4 & 5: RETRIEVE + INJECT - Get relevant memories and format for prompt
         retrieval_start = time.time()
-        memory_context = self._compose_prompt_context(
+        memory_context, active_memories = self._compose_prompt_context(
             user_message, 
             priority_types
         )
         stats['retrieval_time_ms'] = (time.time() - retrieval_start) * 1000
         
-        # Count retrieved memories (rough estimate from formatted text)
-        stats['retrieved_count'] = memory_context.count('\n- ') if memory_context else 0
+        # Count retrieved memories and expose active memories
+        stats['retrieved_count'] = len(active_memories)
+        stats['active_memories'] = active_memories
         
         # Phase 4: Check if consolidation should run
         if self._consolidation_enabled and self.consolidation_worker:
@@ -313,7 +314,7 @@ class MemorySystem:
         self, 
         user_message: str, 
         priority_types: Optional[List[str]] = None,
-    ) -> str:
+    ) -> Tuple[str, List[Dict]]:
         """
         Compose the full memory context for prompt injection.
         
@@ -326,9 +327,12 @@ class MemorySystem:
             priority_types: Memory types to prioritize
         
         Returns:
-            Complete formatted memory context
+            (formatted_context, active_memories) where:
+            - formatted_context: Complete formatted memory context string
+            - active_memories: List of memory dicts with metadata
         """
         sections = []
+        active_memories = []
         
         # Layer 1: Core Memory (always injected)
         core_memory = self.flat_file_store.read_core_memory()
@@ -337,17 +341,37 @@ class MemorySystem:
             sections.append(core_memory)
         
         # Layer 4: Long-Term Memory (selective retrieval)
-        retrieved_memories = self.retriever.retrieve_for_prompt(
+        retrieved_memories_list = self.retriever.retrieve(
             user_message,
             self.turn_number,
             priority_types,
         )
         
-        if retrieved_memories.strip():
-            sections.append("### LONG-TERM MEMORY (Retrieved)")
-            sections.append(retrieved_memories)
+        # Update access tracking for retrieved memories
+        for mem in retrieved_memories_list:
+            self.redis_store.increment_access_count(mem['memory_id'], self.turn_number)
         
-        return "\n\n".join(sections)
+        # Format the active memories for exposure
+        for mem in retrieved_memories_list:
+            active_memories.append({
+                "memory_id": mem.get('memory_id', 'unknown'),
+                "content": f"{mem.get('key', 'unknown')}: {mem.get('value', '')}",
+                "type": mem.get('type', 'fact'),
+                "origin_turn": mem.get('turn_number', 0),
+                "last_used_turn": self.turn_number,
+                "confidence": mem.get('confidence', 0),
+                "mention_count": mem.get('mention_count', 1),
+                "access_count": mem.get('access_count', 0) + 1  # Will be updated after
+            })
+        
+        # Format memories for prompt
+        retrieved_formatted = self.retriever.format_memories_for_prompt(retrieved_memories_list)
+        
+        if retrieved_formatted.strip():
+            sections.append("### LONG-TERM MEMORY (Retrieved)")
+            sections.append(retrieved_formatted)
+        
+        return "\n\n".join(sections), active_memories
 
     def get_prompt_context(
         self, 

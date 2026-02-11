@@ -16,6 +16,7 @@ from .config import (
     OPENAI_API_KEY,
     ANTHROPIC_API_KEY,
     GROQ_API_KEY,
+    GROQ_API_KEYS,
     STAGE_3_MAX_TOKENS,
     STAGE_3_TEMPERATURE,
     UPDATE_PATTERNS,
@@ -26,7 +27,8 @@ logger = logging.getLogger(__name__)
 # Lazy imports for LLM clients
 _openai_client = None
 _anthropic_client = None
-_groq_client = None
+_groq_clients = []  # List of Groq clients (one per API key)
+_current_groq_key_index = 0  # Track which key we're currently using
 
 
 def _get_openai_client():
@@ -64,20 +66,32 @@ def _get_anthropic_client():
 
 
 def _get_groq_client():
-    """Lazy load Groq client"""
-    global _groq_client
-    if _groq_client is None:
+    """Lazy load Groq clients (one per API key)"""
+    global _groq_clients
+    if not _groq_clients:
         try:
             from groq import Groq
-            _groq_client = Groq(api_key=GROQ_API_KEY)
-            logger.info("Groq client initialized")
+            for i, api_key in enumerate(GROQ_API_KEYS, 1):
+                # Disable automatic retries so we can handle rotation ourselves
+                client = Groq(api_key=api_key, max_retries=0)
+                _groq_clients.append(client)
+            logger.info(f"Initialized {len(_groq_clients)} Groq client(s) with multiple API keys")
         except ImportError:
             logger.error("groq package not installed. Run: pip install groq")
             raise
         except Exception as e:
-            logger.error(f"Failed to initialize Groq client: {e}")
+            logger.error(f"Failed to initialize Groq clients: {e}")
             raise
-    return _groq_client
+    return _groq_clients
+
+
+def _rotate_groq_key():
+    """Rotate to the next Groq API key"""
+    global _current_groq_key_index
+    if len(GROQ_API_KEYS) > 1:
+        _current_groq_key_index = (_current_groq_key_index + 1) % len(GROQ_API_KEYS)
+        logger.info(f"Rotated to Groq API key #{_current_groq_key_index + 1} of {len(GROQ_API_KEYS)}")
+    return _current_groq_key_index
 
 
 class LLMExtractor:
@@ -173,8 +187,13 @@ Output (valid JSON array only):"""
         self.escalation_count = 0
         self.total_response_time_ms = 0.0
         self.api_call_count = 0
+        self.key_rotation_count = 0
         
-        logger.info(f"LLM Extractor initialized (provider={self.provider}, model={self.model})")
+        # Log API key configuration
+        if self.provider == "groq" and len(GROQ_API_KEYS) > 1:
+            logger.info(f"LLM Extractor initialized (provider={self.provider}, model={self.model}, keys={len(GROQ_API_KEYS)})")
+        else:
+            logger.info(f"LLM Extractor initialized (provider={self.provider}, model={self.model})")
     
     def extract(
         self, 
@@ -277,17 +296,43 @@ Output (valid JSON array only):"""
         return response.content[0].text
     
     def _call_groq(self, prompt: str) -> str:
-        """Call Groq API"""
-        client = _get_groq_client()
+        """Call Groq API with automatic key rotation on rate limits"""
+        clients = _get_groq_client()
+        global _current_groq_key_index
         
-        response = client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=STAGE_3_MAX_TOKENS,
-            temperature=STAGE_3_TEMPERATURE,
-        )
+        # Try all available keys
+        max_retries = len(clients)
+        for attempt in range(max_retries):
+            try:
+                client = clients[_current_groq_key_index]
+                
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=STAGE_3_MAX_TOKENS,
+                    temperature=STAGE_3_TEMPERATURE,
+                )
+                
+                return response.choices[0].message.content
+                
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error (429)
+                if "429" in error_str or "rate_limit" in error_str.lower() or "too many requests" in error_str.lower():
+                    if attempt < max_retries - 1:  # Not the last attempt
+                        logger.warning(f"Rate limit hit on key #{_current_groq_key_index + 1}, rotating to next key...")
+                        _rotate_groq_key()
+                        self.key_rotation_count += 1
+                        continue
+                    else:
+                        logger.error(f"Rate limit hit on all {max_retries} API keys")
+                        raise
+                else:
+                    # Not a rate limit error, re-raise
+                    raise
         
-        return response.choices[0].message.content
+        # Should not reach here
+        raise Exception("Failed to call Groq API after trying all keys")
     
     def _parse_and_validate(
         self, 

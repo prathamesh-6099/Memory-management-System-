@@ -64,69 +64,90 @@ docker-compose ps
 ### 3. Run the Demo
 
 ```bash
-# Phase 1 demo (basic retrieval)
-python demo.py
-
-# Phase 2 demo (semantic search)
-python demo_phase2.py
-
-# Phase 3 demo (LLM extraction, deduplication, updates)
-# First, set your LLM API key:
-# For Groq (fastest): set GROQ_API_KEY=your_key_here
+# Set your LLM API key(s) first:
+# For Groq (fastest, recommended): 
+#   Single key: set GROQ_API_KEY=your_key_here
+#   Multiple keys for rate limit rotation: 
+#     set GROQ_API_KEY_1=your_first_key
+#     set GROQ_API_KEY_2=your_second_key
 # For OpenAI: set OPENAI_API_KEY=your_key_here
 # For Anthropic: set ANTHROPIC_API_KEY=your_key_here
 
-python demo_phase3.py
-
-# Full conversation test (customer service scenario)
-python test_customer_conversation.py
-
 # Phase 4 demo (consolidation & 5-signal ranking)
 python demo_phase4.py
+
+# Comprehensive test (all phases, 120+ turns, 3 consolidation cycles)
+python test_all_phases.py
+
+# Full conversation test (60-turn customer service scenario with active memory tracking)
+python test_customer_conversation.py
+
+# Active memory tracking demo (10-turn demonstration)
+python demo_active_memories.py
+
+# Simple active memory example (5 turns)
+python example_active_memories.py
 ```
 
-The Phase 2 demo will:
-1. Simulate a conversation with rich information
-2. Extract and store memories with embeddings
-3. Test semantic similarity search
-4. Demonstrate multi-signal ranking
+The demos demonstrate:
 
-The Phase 3 demo will:
-1. Test LLM-based extraction for complex messages
-2. Demonstrate semantic deduplication (similarity > 0.92)
-3. Show memory updates and superseding
-4. Test confidence boosting for repeated information
-5. Verify superseded memories are filtered from retrieval
+**demo_phase4.py**:
+1. Full 4-phase system with LLM extraction
+2. Semantic search and 5-signal ranking
+3. Background consolidation triggering
+4. Memory decay, merging, and promotion
+
+**test_all_phases.py** (comprehensive):
+1. Process 120+ conversation turns with 60+ extractable memories
+2. Trigger automatic consolidation 3 times (at turns 50, 100, 150)
+3. Demonstrate all 4 phases working together
+4. Show memory decay, merging, and promotion to core memory
+5. Test 5-signal ranking with various query types
+6. Multi-API key rotation (avoids rate limits)
+
+**test_customer_conversation.py**:
+1. Realistic 60-turn customer service conversation
+2. Extract customer information, preferences, and transaction details
+3. Demonstrate active memory tracking at each turn
+4. Show which memories influenced each response with full metadata
+
+**demo_active_memories.py**:
+1. 10-turn conversation showing memory tracking
+2. Exposes which memories influenced each response
+3. Shows memory evolution: origin_turn, last_used_turn, access_count
+4. Demonstrates memory persistence across turns
 
 ## Project Structure
 
 ```
-memory-system/
+memory-system-phase1/
 ├── docker-compose.yml          # Redis + Qdrant setup
 ├── redis.conf                  # Redis configuration (AOF persistence)
 ├── requirements.txt            # Python dependencies
-├── demo.py                     # Phase 1 demo script
-├── demo_phase2.py              # Phase 2 demo script
-├── demo_phase3.py              # Phase 3 demo script
-├── demo_phase4.py              # Phase 4 demo script
-├── test_customer_conversation.py  # Full conversation test
+├── .env.example                # Environment variable template
+├── .gitignore                  # Git ignore patterns
+├── demo_phase4.py              # Phase 4 demo (consolidation)
+├── test_all_phases.py          # Comprehensive test (120+ turns)
+├── test_customer_conversation.py  # Customer service test (60 turns)
+├── demo_active_memories.py     # Active memory tracking demo
+├── example_active_memories.py  # Simple active memory example
 ├── memory/                     # Flat file storage
-│   └── user_1/                # Per-user directory
-│       ├── CORE.md            # Core identity (always injected)
-│       ├── PREFERENCES.md     # User preferences
-│       ├── INSTRUCTIONS.md    # Behavioral instructions
-│       └── CONSTRAINTS.md     # Hard constraints
-└── src/                       # Source code
+│   └── user_1/                 # Per-user directory
+│       ├── CORE.md             # Core identity (always injected)
+│       ├── PREFERENCES.md      # User preferences
+│       ├── INSTRUCTIONS.md     # Behavioral instructions
+│       └── CONSTRAINTS.md      # Hard constraints
+└── src/                        # Source code
     ├── __init__.py
-    ├── config.py              # Configuration & tunable parameters
-    ├── flat_file_store.py     # Flat file storage layer
-    ├── redis_store.py         # Redis storage layer (Phase 3: + superseding)
-    ├── extractor.py           # Memory extraction (Stage 1, 2 & 3)
-    ├── llm_extractor.py       # Phase 3: LLM-based extraction
-    ├── retriever.py           # Memory retrieval (with semantic search)
-    ├── memory_system.py       # Main orchestrator
-    ├── embedding_service.py   # Phase 2: Embedding generation
-    ├── vector_store.py        # Phase 2: Qdrant vector store
+    ├── config.py               # Configuration & tunable parameters
+    ├── flat_file_store.py      # Flat file storage layer
+    ├── redis_store.py          # Redis storage layer (with superseding)
+    ├── extractor.py            # Memory extraction (Stage 1, 2 & 3)
+    ├── llm_extractor.py        # Phase 3: LLM-based extraction (multi-key support)
+    ├── retriever.py            # Memory retrieval (5-signal ranking)
+    ├── memory_system.py        # Main orchestrator (with active memory tracking)
+    ├── embedding_service.py    # Phase 2: Embedding generation
+    ├── vector_store.py         # Phase 2: Qdrant vector store
     └── consolidation_worker.py # Phase 4: Background consolidation
 ```
 
@@ -144,6 +165,15 @@ memory = MemorySystem(user_id="alice")
 for user_message in conversation:
     memory_context, stats = memory.process_turn(user_message)
     
+    # Access active memories that influenced this response
+    active_memories = stats.get('active_memories', [])
+    for mem in active_memories:
+        print(f"Memory {mem['memory_id']} influenced response:")
+        print(f"  Content: {mem['content']}")
+        print(f"  Origin: Turn {mem['origin_turn']}")
+        print(f"  Last Used: Turn {mem['last_used_turn']}")
+        print(f"  Confidence: {mem['confidence']:.2f}")
+    
     # Inject memory_context into your LLM prompt
     prompt = f"""
     {memory_context}
@@ -155,6 +185,38 @@ for user_message in conversation:
     # Generate response with your LLM
     response = your_llm(prompt)
 ```
+
+### Active Memory Tracking
+
+The system exposes which memories influenced each response:
+
+```python
+# Process a turn
+_, stats = memory.process_turn("What are my scheduling preferences?")
+
+# Get active memories
+active_memories = stats['active_memories']
+
+# Example output:
+# [
+#   {
+#     "memory_id": "mem_0142",
+#     "content": "call_preference: after 11 AM",
+#     "type": "preference",
+#     "origin_turn": 1,
+#     "last_used_turn": 412,
+#     "confidence": 0.95,
+#     "mention_count": 1,
+#     "access_count": 15
+#   }
+# ]
+```
+
+This allows you to:
+- Track which memories influenced each response
+- Debug retrieval behavior  
+- Audit memory usage over time
+- Validate memory relevance
 
 ### Retrieval Only
 
@@ -314,7 +376,7 @@ All tunable parameters are in `src/config.py`:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `CONSOLIDATION_ENABLED` | True | Enable/disable background consolidation |
-| `CONSOLIDATION_INTERVAL_TURNS` | 10 | Turns between consolidation runs |
+| `CONSOLIDATION_INTERVAL_TURNS` | 50 | Turns between consolidation runs |
 | `MEMORY_DECAY_ENABLED` | True | Enable memory decay for old memories |
 | `MEMORY_MERGE_ENABLED` | True | Enable merging of similar memories |
 | `PROMOTION_ENABLED` | True | Enable promotion to Core Memory |
@@ -375,25 +437,55 @@ All tunable parameters are in `src/config.py`:
 - Synthetic test generator
 - Regression test suites
 
-### Phase 6 (Weeks 11-12)
-- Parameter tuning
-- Production monitoring
-- Performance optimization
+### Comprehensive Test
 
-## Testing
-
-The `demo.py` script serves as both a demo and a basic test:
+The `test_all_phases.py` runs a full system test:
 
 ```bash
-python demo.py
+python test_all_phases.py
 ```
 
 It validates:
-- Extraction accuracy (should extract ~15-20 memories from 20 turns)
-- Filtering effectiveness (should filter ~5 empty turns)
-- Storage persistence
-- Retrieval relevance
-- Deduplication
+- All 4 phases working together (120+ turns)
+- Automatic consolidation triggering (3 cycles at turns 50, 100, 150)
+- 60+ memory extractions from realistic dialogue
+- 5-signal ranking effectiveness
+- Memory decay, merging, and promotion to core memory
+- Multi-API key rotation (prevents rate limit issues)
+- Performance metrics across extended conversations
+
+### Customer Service Test
+
+The `test_customer_conversation.py` runs a realistic scenario:
+
+```bash
+python test_customer_conversation.py
+```
+
+It validates:
+- 60-turn customer service conversation
+- Extraction of entities, facts, preferences, and constraints
+- Active memory tracking (which memories influenced each response)
+- Memory persistence and access count tracking
+- JSON output format for integration
+
+### Active Memory Demos
+
+These demonstrate the active memory tracking feature:
+
+```bash
+# 10-turn comprehensive demo
+python demo_active_memories.py
+
+# 5-turn simple example
+python example_active_memories.py
+```
+
+They show:
+- Which memories influenced each response
+- Memory metadata: origin_turn, last_used_turn, access_count, confidence
+- Memory evolution across conversation turns
+- JSON output format for debugging and auditing
 
 ## Troubleshooting
 

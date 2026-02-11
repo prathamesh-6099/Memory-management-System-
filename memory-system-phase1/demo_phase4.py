@@ -118,6 +118,9 @@ def demo_consolidation():
     print(f"  - Confidence >= {PROMOTION_CONFIDENCE_THRESHOLD}")
     print(f"  - Mentions >= {PROMOTION_MENTION_THRESHOLD}")
     print(f"  - Accesses >= {PROMOTION_ACCESS_THRESHOLD}")
+    print(f"\nNote: This demo has {len(SAMPLE_CONVERSATION)} turns.")
+    print(f"      Automatic consolidation won't trigger (needs {CONSOLIDATION_INTERVAL_TURNS} turns).")
+    print(f"      Demo will force manual consolidation at the end.")
 
 
 def main():

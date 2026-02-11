@@ -124,7 +124,17 @@ LLM_PROVIDER = "groq"  # "openai" | "anthropic" | "groq"
 LLM_EXTRACTION_MODEL = os.getenv("LLM_EXTRACTION_MODEL", "llama-3.3-70b-versatile")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+# Support multiple Groq API keys for rate limit rotation
+GROQ_API_KEYS = [
+    key for key in [
+        os.getenv("GROQ_API_KEY"),
+        os.getenv("GROQ_API_KEY_1"),
+        os.getenv("GROQ_API_KEY_2"),
+    ] if key is not None
+]
+GROQ_API_KEY = GROQ_API_KEYS[0] if GROQ_API_KEYS else None  # Backward compatibility
+
 STAGE_3_CONFIDENCE_THRESHOLD = 0.7  # Escalate to LLM if Stage 2 < this
 STAGE_3_MAX_TOKENS = 200  # Max tokens for LLM extraction response
 STAGE_3_TEMPERATURE = 0.1  # Low temperature for consistent extraction
