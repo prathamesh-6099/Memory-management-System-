@@ -1,6 +1,7 @@
 """
-Memory Retrieval - Phase 1, 2 & 3
-Type-based + recency-based retrieval with semantic search (Phase 2) and superseding filter (Phase 3)
+Memory Retrieval - Phase 1, 2, 3 & 4
+Type-based + recency-based retrieval with semantic search (Phase 2), 
+superseding filter (Phase 3), and 5-signal ranking (Phase 4)
 """
 
 import logging
@@ -18,6 +19,11 @@ from .config import (
     TYPE_PRIORITIES,
     RECENCY_DECAY_RATE,
     RECENCY_MAX_TURNS,
+    # Phase 4 imports
+    RANKING_WEIGHTS_5_SIGNAL,
+    FREQUENCY_DECAY_RATE,
+    FREQUENCY_MAX_ACCESSES,
+    ACCESS_RECENCY_WEIGHT,
 )
 from .redis_store import RedisStore
 
@@ -29,24 +35,28 @@ class MemoryRetriever:
     Retrieves relevant memories for prompt injection.
     
     Phase 1: Type priority + recency-based retrieval
-    Phase 2: Adds semantic search + multi-signal ranking
+    Phase 2: Adds semantic search + multi-signal ranking (3 signals)
     Phase 3: Filters superseded memories
+    Phase 4: 5-signal ranking (semantic + type + recency + frequency + confidence)
     """
 
-    def __init__(self, redis_store: RedisStore, vector_store=None):
+    def __init__(self, redis_store: RedisStore, vector_store=None, use_5_signal: bool = True):
         """
         Initialize the retriever.
         
         Args:
             redis_store: Redis store instance
             vector_store: Optional vector store for semantic search (Phase 2)
+            use_5_signal: Use 5-signal ranking (Phase 4) instead of 3-signal
         """
         self.redis_store = redis_store
         self.vector_store = vector_store
         self._semantic_enabled = SEMANTIC_SEARCH_ENABLED and vector_store is not None
+        self._use_5_signal = use_5_signal
         
         if self._semantic_enabled:
-            logger.info("Semantic search enabled for memory retrieval")
+            ranking_mode = "5-signal" if use_5_signal else "3-signal"
+            logger.info(f"Semantic search enabled for memory retrieval ({ranking_mode} ranking)")
         else:
             logger.info("Using non-semantic retrieval (Phase 1 mode)")
     
@@ -188,12 +198,44 @@ class MemoryRetriever:
             turns_ago = max(0, turn_number - mem_turn)
             recency_score = math.exp(-RECENCY_DECAY_RATE * turns_ago)
             
-            # Combined score using weighted sum
-            final_score = (
-                RANKING_WEIGHTS['semantic'] * semantic_score +
-                RANKING_WEIGHTS['type'] * type_score +
-                RANKING_WEIGHTS['recency'] * recency_score
-            )
+            if self._use_5_signal:
+                # Phase 4: 5-signal ranking
+                # Frequency score (0-1) - based on access count and recency
+                access_count = int(memory.get('access_count', 0))
+                last_accessed = int(memory.get('last_accessed_turn', mem_turn))
+                access_recency = max(0, turn_number - last_accessed)
+                
+                # Normalize access count
+                normalized_access = min(1.0, access_count / FREQUENCY_MAX_ACCESSES)
+                # Decay based on recency of last access
+                access_recency_factor = math.exp(-FREQUENCY_DECAY_RATE * access_recency)
+                # Combine count and recency
+                frequency_score = (
+                    (1 - ACCESS_RECENCY_WEIGHT) * normalized_access +
+                    ACCESS_RECENCY_WEIGHT * access_recency_factor * normalized_access
+                )
+                
+                # Confidence score (0-1) - from memory's stored confidence
+                confidence_score = float(memory.get('confidence', 0.5))
+                
+                # Combined score using 5-signal weighted sum
+                final_score = (
+                    RANKING_WEIGHTS_5_SIGNAL['semantic'] * semantic_score +
+                    RANKING_WEIGHTS_5_SIGNAL['type'] * type_score +
+                    RANKING_WEIGHTS_5_SIGNAL['recency'] * recency_score +
+                    RANKING_WEIGHTS_5_SIGNAL['frequency'] * frequency_score +
+                    RANKING_WEIGHTS_5_SIGNAL['confidence'] * confidence_score
+                )
+                
+                memory['frequency_score'] = frequency_score
+                memory['confidence_score'] = confidence_score
+            else:
+                # Phase 2/3: 3-signal ranking
+                final_score = (
+                    RANKING_WEIGHTS['semantic'] * semantic_score +
+                    RANKING_WEIGHTS['type'] * type_score +
+                    RANKING_WEIGHTS['recency'] * recency_score
+                )
             
             memory['retrieval_score'] = final_score
             memory['semantic_score'] = semantic_score
@@ -217,6 +259,10 @@ class MemoryRetriever:
             max_count = MEMORY_TOKEN_BUDGET // 50
             top_memories = top_memories[:max_count]
             logger.warning(f"Trimmed memories to {max_count} to fit token budget")
+        
+        # Phase 4: Track access counts
+        for memory in top_memories:
+            self.redis_store.increment_access_count(memory['memory_id'], turn_number)
         
         logger.info(
             f"Retrieved {len(top_memories)} memories (semantic search) for turn {turn_number} "
