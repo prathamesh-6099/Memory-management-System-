@@ -128,6 +128,7 @@ class MemorySystem:
             self.redis_store, 
             vector_store=self.vector_store if self._semantic_enabled else None,
             use_5_signal=True,  # Phase 4: Use 5-signal ranking
+            user_id=self.user_id,  # Pass user_id for multi-user isolation
         )
         
         # Initialize Phase 4 consolidation worker
@@ -186,6 +187,11 @@ class MemorySystem:
         # STEP 1: EXTRACT - Identify memories from this message
         extract_start = time.time()
         extracted_memories = self.extractor.extract(user_message, self.turn_number)
+        
+        # Add user_id to all extracted memories
+        for memory in extracted_memories:
+            memory['user_id'] = self.user_id
+        
         stats['extraction_time_ms'] = (time.time() - extract_start) * 1000
         stats['extracted_count'] = len(extracted_memories)
         
@@ -438,7 +444,14 @@ class MemorySystem:
 
     def clear_memories(self):
         """Clear all long-term memories (use with caution!)"""
-        logger.warning(f"Clearing all memories for user {self.user_id}")
+        # Check if there are memories to clear
+        all_mems = self.redis_store.get_all_memories()
+        
+        if not all_mems:
+            logger.debug(f"No memories to clear for user {self.user_id}")
+            return
+        
+        logger.warning(f"Clearing {len(all_mems)} memories for user {self.user_id}")
         self.redis_store.clear_all_memories()
         
         # Phase 2: Also clear vector store

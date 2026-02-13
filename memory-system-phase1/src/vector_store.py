@@ -110,6 +110,7 @@ class VectorStore:
             # Prepare payload (metadata stored with vector)
             payload = {
                 "memory_id": memory_id,
+                "user_id": memory.get('user_id', 'unknown'),  # Multi-user support
                 "memory_type": memory.get('type', 'fact'),
                 "key": memory.get('key', ''),
                 "value": memory.get('value', ''),
@@ -198,6 +199,7 @@ class VectorStore:
         limit: int = 10,
         memory_types: Optional[List[str]] = None,
         min_score: float = 0.0,
+        user_id: Optional[str] = None,  # Filter by user
     ) -> List[Dict]:
         """
         Search for memories similar to the query.
@@ -207,6 +209,7 @@ class VectorStore:
             limit: Maximum number of results
             memory_types: Filter by these memory types (None for all types)
             min_score: Minimum similarity score threshold
+            user_id: Filter by user ID (None for all users)
         
         Returns:
             List of dictionaries with 'memory', 'score', 'memory_id' keys
@@ -219,6 +222,7 @@ class VectorStore:
             limit=limit, 
             memory_types=memory_types,
             min_score=min_score,
+            user_id=user_id,
         )
     
     def search_by_vector(
@@ -227,6 +231,7 @@ class VectorStore:
         limit: int = 10,
         memory_types: Optional[List[str]] = None,
         min_score: float = 0.0,
+        user_id: Optional[str] = None,  # Filter by user
     ) -> List[Dict]:
         """
         Search for memories using a pre-computed query vector.
@@ -236,22 +241,36 @@ class VectorStore:
             limit: Maximum number of results
             memory_types: Filter by these memory types (None for all types)
             min_score: Minimum similarity score threshold
+            user_id: Filter by user ID (None for all users)
         
         Returns:
             List of dictionaries with 'memory', 'score', 'memory_id' keys
         """
         try:
-            # Build filter if memory types specified
-            query_filter = None
-            if memory_types:
-                query_filter = models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="memory_type",
-                            match=models.MatchAny(any=memory_types),
-                        )
-                    ]
+            # Build filters
+            filter_conditions = []
+            
+            # Filter by user_id (critical for multi-user isolation)
+            if user_id:
+                filter_conditions.append(
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    )
                 )
+            
+            # Filter by memory types
+            if memory_types:
+                filter_conditions.append(
+                    models.FieldCondition(
+                        key="memory_type",
+                        match=models.MatchAny(any=memory_types),
+                    )
+                )
+            
+            query_filter = None
+            if filter_conditions:
+                query_filter = models.Filter(must=filter_conditions)
             
             # Perform search
             results = self.client.search(
@@ -346,15 +365,17 @@ class VectorStore:
         # Generate embedding for the new memory
         embedding = self.embedding_service.embed_memory(memory)
         
-        # Search for similar memories of the same type
+        # Search for similar memories of the same type AND same user
         memory_type = memory.get('type')
         memory_types = [memory_type] if memory_type else None
+        user_id = memory.get('user_id')  # Extract user_id from memory
         
         results = self.search_by_vector(
             query_vector=embedding,
             limit=limit,
             memory_types=memory_types,
-            min_score=threshold
+            min_score=threshold,
+            user_id=user_id,  # Filter by user for multi-user isolation
         )
         
         # Return simplified list

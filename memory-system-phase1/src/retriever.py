@@ -24,6 +24,10 @@ from .config import (
     FREQUENCY_DECAY_RATE,
     FREQUENCY_MAX_ACCESSES,
     ACCESS_RECENCY_WEIGHT,
+    # Hybrid retrieval imports
+    HYBRID_RETRIEVAL_ENABLED,
+    RECENCY_RETRIEVAL_LIMIT,
+    RECENCY_FALLBACK_SEMANTIC_SCORE,
 )
 from .redis_store import RedisStore
 
@@ -40,7 +44,7 @@ class MemoryRetriever:
     Phase 4: 5-signal ranking (semantic + type + recency + frequency + confidence)
     """
 
-    def __init__(self, redis_store: RedisStore, vector_store=None, use_5_signal: bool = True):
+    def __init__(self, redis_store: RedisStore, vector_store=None, use_5_signal: bool = True, user_id: Optional[str] = None):
         """
         Initialize the retriever.
         
@@ -48,9 +52,11 @@ class MemoryRetriever:
             redis_store: Redis store instance
             vector_store: Optional vector store for semantic search (Phase 2)
             use_5_signal: Use 5-signal ranking (Phase 4) instead of 3-signal
+            user_id: User ID for multi-user isolation
         """
         self.redis_store = redis_store
         self.vector_store = vector_store
+        self.user_id = user_id  # Store user_id for filtering
         self._semantic_enabled = SEMANTIC_SEARCH_ENABLED and vector_store is not None
         self._use_5_signal = use_5_signal
         
@@ -123,20 +129,23 @@ class MemoryRetriever:
         priority_types: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
-        Phase 2: Retrieve using semantic search + multi-signal ranking.
+        Phase 2+: Hybrid retrieval using semantic search + recency-based retrieval.
         
-        Ranking formula:
-            final_score = w_semantic * semantic_score 
-                        + w_type * type_priority 
-                        + w_recency * recency_score
+        Strategy:
+        - Semantic branch: Memories with similarity > MIN_SEMANTIC_SCORE
+        - Recency branch: Recent memories (bypass semantic filter entirely)
+        - Merge both, then apply 5-signal ranking
+        
+        This ensures old memories with low semantic similarity still get retrieved.
         """
         all_memories = {}  # memory_id -> memory with scores
         
-        # Step 1: Get candidates from semantic search
+        # Branch 1: Semantic Search (content relevance with filter)
         semantic_results = self.vector_store.search_similar(
             query=current_message,
             limit=SEMANTIC_SEARCH_LIMIT,
             min_score=MIN_SEMANTIC_SCORE,
+            user_id=self.user_id,  # Filter by user for multi-user isolation
         )
         
         for result in semantic_results:
@@ -154,6 +163,23 @@ class MemoryRetriever:
                 all_memories[memory_id] = memory
         
         logger.debug(f"Semantic search found {len(all_memories)} candidates")
+        
+        # Branch 2: Recency-Based Retrieval (temporal relevance, NO semantic filter)
+        if HYBRID_RETRIEVAL_ENABLED:
+            recent_memories = self.redis_store.get_recent_memories(
+                limit=RECENCY_RETRIEVAL_LIMIT
+            )
+            
+            recency_added = 0
+            for mem in recent_memories:
+                mem_id = mem['memory_id']
+                if mem_id not in all_memories:
+                    # Assign fallback semantic score (neutral, doesn't dominate)
+                    mem['semantic_score'] = RECENCY_FALLBACK_SEMANTIC_SCORE
+                    all_memories[mem_id] = mem
+                    recency_added += 1
+                    
+            logger.debug(f"Recency branch added {recency_added} new candidates (hybrid mode)")
         
         # Step 2: Always include constraint and instruction types
         always_on_types = ["constraint", "instruction"]

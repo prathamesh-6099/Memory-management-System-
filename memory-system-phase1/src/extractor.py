@@ -261,6 +261,42 @@ class MemoryExtractor:
                     source_text=message,
                 ))
         
+        # PAYMENT/FINANCIAL patterns (fact type)
+        payment_patterns = [
+            # Account numbers
+            (r"account(?: number| ending in|:)? (\d+)", "account_number", 0.95),
+            # Payment amounts
+            (r"(?:payment|balance|amount|bill) (?:of )?\$(\d+(?:,\d+)?)", "payment_amount", 0.9),
+            (r"\$(\d+(?:,\d+)?).*(?:due|owed|outstanding)", "amount_due", 0.9),
+            # Due dates
+            (r"due (?:on |date )?([A-Z][a-z]+ \d+(?:st|nd|rd|th)?)", "due_date", 0.9),
+            (r"(?:by|before) ([A-Z][a-z]+ \d+(?:st|nd|rd|th)?)", "deadline_date", 0.85),
+            # Payment status
+            (r"(?:already |just )?paid.*?(\d+) days? ago", "payment_made", 0.9),
+            (r"payment.*?(?:received|processed|submitted)", "payment_status_received", 0.85),
+            (r"outstanding balance", "status_outstanding", 0.8),
+            # Payment arrangements
+            (r"payment (?:plan|extension) (?:of )?(\d+) days?", "payment_arrangement", 0.85),
+            (r"(?:set up|setup) (?:a )?payment plan", "request_payment_plan", 0.8),
+            # Customer info in payment context
+            (r"(?:calling|speaking with) ([A-Z][a-z]+)", "customer_name", 0.85),
+            (r"(?:this is |my name is )([A-Z][a-z]+)", "speaker_name", 0.9),
+        ]
+        
+        for pattern, key_template, confidence in payment_patterns:
+            matches = re.finditer(pattern, message)
+            for match in matches:
+                value = match.group(1).strip() if match.groups() else "true"
+                memories.append(self._create_memory(
+                    memory_type="fact",
+                    key=key_template,
+                    value=value,
+                    confidence=confidence,
+                    turn_number=turn_number,
+                    timestamp=timestamp,
+                    source_text=message,
+                ))
+        
         if memories:
             logger.info(f"Extracted {len(memories)} memories from turn {turn_number}")
         
