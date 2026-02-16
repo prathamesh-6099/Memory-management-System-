@@ -1,0 +1,180 @@
+MIT License
+
+Copyright (c) 2026 Prathamesh Kolhe, Gaurav Chaudhari
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+THIRD-PARTY LICENSES
+================================================================================
+
+This project uses the following third-party libraries and services:
+
+1. Redis
+   - License: BSD 3-Clause License
+   - Copyright (c) 2006-2024, Redis Ltd.
+   - https://redis.io/docs/about/license/
+
+2. Qdrant
+   - License: Apache License 2.0
+   - Copyright (c) 2021-2024, Qdrant Solutions GmbH
+   - https://github.com/qdrant/qdrant/blob/master/LICENSE
+
+3. Sentence-Transformers
+   - License: Apache License 2.0
+   - Copyright (c) 2019-2024, Nils Reimers
+   - https://github.com/UKPLab/sentence-transformers/blob/master/LICENSE
+
+4. Python Redis Client (redis-py)
+   - License: MIT License
+   - Copyright (c) 2012-2024, Andy McCurdy
+   - https://github.com/redis/redis-py/blob/master/LICENSE
+
+5. Qdrant Client
+   - License: Apache License 2.0
+   - Copyright (c) 2021-2024, Qdrant Solutions GmbH
+   - https://github.com/qdrant/qdrant-client/blob/master/LICENSE
+
+6. Anthropic Python SDK (optional dependency)
+   - License: MIT License
+   - Copyright (c) 2023-2024, Anthropic PBC
+   - https://github.com/anthropics/anthropic-sdk-python/blob/main/LICENSE
+
+7. OpenAI Python SDK (optional dependency)
+   - License: Apache License 2.0
+   - Copyright (c) 2020-2024, OpenAI
+   - https://github.com/openai/openai-python/blob/main/LICENSE
+
+8. python-dateutil
+   - License: Apache License 2.0 or BSD 3-Clause License (dual-licensed)
+   - Copyright (c) 2003-2024, Gustavo Niemeyer
+   - https://github.com/dateutil/dateutil/blob/master/LICENSE
+
+================================================================================
+ATTRIBUTION REQUIREMENTS
+================================================================================
+
+If you use this software in your research, please cite:
+
+    Kolhe, P. (2026). Long-Form Memory System: A Multi-Layer Architecture 
+    for AI Memory Across 1000+ Turns. GitHub Repository.
+
+BibTeX:
+    @software{kolhe2026memory,
+      author = {Kolhe, Prathamesh},
+      title = {Long-Form Memory System},
+      year = {2026},
+      publisher = {GitHub},
+      journal = {GitHub repository},
+      howpublished = {\url{https://github.com/prathameshkolhe/memory-system}}
+    }
+
+================================================================================
+API SERVICE TERMS
+================================================================================
+
+This software integrates with external API services that have their own terms:
+
+1. Anthropic Claude API
+   - Subject to Anthropic's Terms of Service
+   - https://www.anthropic.com/legal/commercial-terms
+
+2. OpenAI API
+   - Subject to OpenAI's Terms of Use
+   - https://openai.com/policies/terms-of-use
+
+Users are responsible for complying with these third-party terms when using
+the respective API integrations.
+
+================================================================================
+DATA PRIVACY NOTICE
+================================================================================
+
+This software processes and stores user conversation data. When deploying:
+
+1. Core Memory files (Markdown) are stored locally on disk
+2. Redis stores structured memory data (can be encrypted at rest)
+3. Qdrant stores vector embeddings (can be configured for encryption)
+4. LLM API calls send conversation excerpts to third-party services
+
+Implementers are responsible for:
+- Compliance with applicable data protection regulations (GDPR, CCPA, etc.)
+- Implementing appropriate security measures
+- Obtaining necessary user consents
+- Handling data deletion requests
+- Securing API keys and credentials
+
+================================================================================
+DISCLAIMER
+================================================================================
+
+This is research/educational software. Production deployment requires:
+- Security hardening
+- Data encryption (at rest and in transit)
+- Access control and authentication
+- Monitoring and logging
+- Backup and disaster recovery
+- Compliance with applicable regulations
+
+The authors assume no liability for:
+- Data loss or corruption
+- Security breaches
+- Privacy violations
+- API costs incurred
+- Production deployment issues
+
+Use at your own risk. Always review and test thoroughly before production use.
+
+================================================================================
+CONTRIBUTION GUIDELINES
+================================================================================
+
+Contributions are welcome! By contributing, you agree that:
+
+1. Your contributions will be licensed under the same MIT License
+2. You have the right to submit the contributions
+3. Your contributions do not violate any third-party rights
+4. You grant the project maintainers a perpetual, worldwide, non-exclusive,
+   royalty-free license to use, modify, and distribute your contributions
+
+================================================================================
+CONTACT
+================================================================================
+
+For questions, issues, or collaboration:
+- GitHub Issues: https://github.com/prathameshkolhe/memory-system/issues
+- Project Repository: https://github.com/prathameshkolhe/memory-system
+- Documentation: See README.md and phase guides
+
+================================================================================
+VERSION HISTORY
+================================================================================
+
+v1.0.0 (February 2026)
+- Initial release with Phase 1-6 complete implementation
+- Multi-layer memory architecture
+- Three-stage extraction pipeline
+- Dual storage (Redis + Qdrant)
+- Multi-signal ranking
+- LLM integration
+- Background consolidation
+
+================================================================================
+
+Last Updated: February 17, 2026
