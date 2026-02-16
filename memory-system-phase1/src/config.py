@@ -53,19 +53,25 @@ EXTRACTION_KEYWORDS = {
     "instruction": ["always", "whenever", "remember to", "make sure", "don't forget"],
     "commitment": ["will", "promise", "committed", "deadline", "by", "before"],
     "fact": ["live in", "work at", "am", "is", "from", "born", "studied"],
+    "payment": ["payment", "account", "balance", "due", "amount", "bill", "paid", "extension", "plan", "outstanding", "received"],
 }
 
 # Memory Types (for Redis indexing)
 MEMORY_TYPES = ["preference", "constraint", "entity", "instruction", "commitment", "fact", "event"]
 
 # Retrieval Configuration
-MAX_MEMORIES_TO_RETRIEVE = 10  # Top K memories to inject
-MEMORY_TOKEN_BUDGET = 500  # Total token budget for retrieved memories
+MAX_MEMORIES_TO_RETRIEVE = 50  # Top K memories to inject (increased for better long-term recall)
+MEMORY_TOKEN_BUDGET = 3000  # Total token budget for retrieved memories
 
 # Phase 2: Semantic Search Configuration
 SEMANTIC_SEARCH_ENABLED = True  # Enable vector-based semantic search
-SEMANTIC_SEARCH_LIMIT = 20  # Number of candidates from vector search
-MIN_SEMANTIC_SCORE = 0.3  # Minimum similarity score to consider
+SEMANTIC_SEARCH_LIMIT = 100  # Number of candidates from vector search (increased for diversity)
+MIN_SEMANTIC_SCORE = 0.1  # Minimum similarity score (lowered for better long-term recall)
+
+# Hybrid Retrieval Configuration (Phase 5+)
+HYBRID_RETRIEVAL_ENABLED = True  # Combine semantic + recency retrieval
+RECENCY_RETRIEVAL_LIMIT = 50  # Number of recent memories to fetch (bypasses semantic filter)
+RECENCY_FALLBACK_SEMANTIC_SCORE = 0.15  # Semantic score assigned to recency-only memories
 
 # Phase 2: Multi-Signal Ranking Weights
 # These weights sum to 1.0 for final score calculation
@@ -87,8 +93,10 @@ TYPE_PRIORITIES = {
 }
 
 # Recency decay configuration
-RECENCY_DECAY_RATE = 0.1  # Decay factor per turn (exponential decay)
-RECENCY_MAX_TURNS = 100   # After this many turns, recency score approaches 0
+# FIXED: Was 0.1 (too aggressive - 1000 turns = 0 score)
+# Now 0.001 (gentler - 1000 turns = 0.37 score)
+RECENCY_DECAY_RATE = 0.001  # Decay factor per turn (exponential decay)
+RECENCY_MAX_TURNS = 5000    # After this many turns, recency score approaches 0
 
 # Redis Key Prefixes
 REDIS_MEMORY_PREFIX = "mem:"
@@ -131,12 +139,13 @@ GROQ_API_KEYS = [
         os.getenv("GROQ_API_KEY"),
         os.getenv("GROQ_API_KEY_1"),
         os.getenv("GROQ_API_KEY_2"),
+        os.getenv("GROQ_API_KEY_3"),
     ] if key is not None
 ]
 GROQ_API_KEY = GROQ_API_KEYS[0] if GROQ_API_KEYS else None  # Backward compatibility
 
 STAGE_3_CONFIDENCE_THRESHOLD = 0.7  # Escalate to LLM if Stage 2 < this
-STAGE_3_MAX_TOKENS = 200  # Max tokens for LLM extraction response
+STAGE_3_MAX_TOKENS = 500  # Max tokens for LLM extraction response (increased to prevent JSON cutoffs)
 STAGE_3_TEMPERATURE = 0.1  # Low temperature for consistent extraction
 
 # Phase 3: Semantic Deduplication Configuration
@@ -214,12 +223,14 @@ PROMOTION_AGE_THRESHOLD = 50           # Min turns old for promotion
 PROMOTABLE_TYPES = ["entity", "preference", "constraint", "instruction"]
 
 # 5-Signal Ranking Weights (must sum to 1.0)
+# Rebalanced to reduce semantic dominance and prioritize memory type diversity
+# Frequency reduced to minimal - it creates circular dependency (accessed memories rank higher)
 RANKING_WEIGHTS_5_SIGNAL = {
-    "semantic": 0.35,     # Semantic similarity score weight
-    "type": 0.20,         # Memory type priority weight
-    "recency": 0.20,      # Recency score weight
-    "frequency": 0.15,    # Access frequency weight (NEW)
-    "confidence": 0.10,   # Confidence score weight (NEW)
+    "semantic": 0.30,     # Semantic similarity (reduced: generic queries shouldn't dominate)
+    "type": 0.40,         # Memory type priority (increased: ensures diversity across types)
+    "recency": 0.10,      # Recency score (gentler penalty for old memories)
+    "frequency": 0.05,    # Access frequency (minimal: prevents circular dependency)
+    "confidence": 0.15,   # Confidence score (increased: extraction quality matters)
 }
 
 # Frequency scoring configuration

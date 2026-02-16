@@ -346,10 +346,14 @@ class RedisStore:
 
     def clear_all_memories(self):
         """Clear all memories (use with caution!)"""
-        logger.warning("Clearing ALL memories from Redis")
-        
-        # Get all memory IDs
+        # Get all memory IDs first to check if there's anything to clear
         memory_ids = self.client.zrange(REDIS_RECENCY_INDEX, 0, -1)
+        
+        if not memory_ids:
+            logger.debug("No memories to clear (Redis already empty)")
+            return
+        
+        logger.warning(f"Clearing {len(memory_ids)} memories from Redis")
         
         # Delete each memory properly
         for memory_id in memory_ids:
